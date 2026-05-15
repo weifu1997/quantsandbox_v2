@@ -170,7 +170,37 @@ data/raw/
 - 采集后做结构化验收
 - 判断这一轮结果是否可接受
 
-## 基本面来源
+## 仓库边界与版本化规则
+
+默认原则：**只版本化稳定参考数据与文档样例，不默认版本化运行态产物。**
+
+### 建议默认入库
+- `data/raw/reference/`
+  - 例如：`stock_basic_main_board.parquet`
+  - 用途：主板 universe、ticker 合法性校验、名称映射
+- `data/archive/legacy-flat-files/`
+  - 作为历史兼容样例和迁移参考
+- 文档、脚本、测试
+
+### 建议默认不入库（运行态产物）
+- `data/raw/market/`
+- `data/raw/fundamentals/`
+- `data/datasets/`
+- `data/db/`
+- `data/reports/`
+- `data/cache/`
+- `manifest / checkpoint / precheck / validation` 等 JSON 报告文件
+
+原因：
+- 这些文件体积大、变化频繁
+- 包含运行时状态，不利于代码仓库保持干净
+- 容易引入测试污染、脏状态和无意义 diff
+
+### 例外情况
+如果某一轮数据需要保留为“验收基线”或“公开样例”，建议：
+- 单独建立样例目录或 release artifact
+- 不要直接把大规模运行态全量数据长期堆在主分支仓库里
+
 
 - `pe/pb`：`daily_basic`
 - `roe`：`fina_indicator`

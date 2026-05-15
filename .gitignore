@@ -9,5 +9,21 @@ __pycache__/
 # Virtual env
 .venv/
 
+# Runtime data: keep only reference/legacy samples by default
+# Ignore mutable runtime outputs under data/
+data/cache/
+data/db/
+data/datasets/
+data/reports/
+data/raw/market/
+data/raw/fundamentals/
+data/raw/*.json
+
+# Allow curated reference + legacy sample docs/data
+!data/raw/reference/
+!data/raw/reference/**
+!data/archive/
+!data/archive/**
+
 # OS/editor
 .DS_Store

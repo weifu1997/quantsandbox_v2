@@ -171,18 +171,13 @@ class TushareMarketDataAdapter:
             return f"sz{s[:-3]}".lower()
         return s.lower()
 
-    def _apply_rate_limit(self, rate_kind: str) -> None:
-        limiter = getattr(self, "rate_limiter", None)
-        if limiter is not None:
-            limiter.acquire(rate_kind)
-
     def _call_with_retry(self, fn, label: str, retries: int = 2, timeout_seconds: float = 20.0, rate_kind: str = "market", **kwargs):
         from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
         last_error = None
         for attempt in range(1, retries + 2):
             t0 = time.time()
-            self._apply_rate_limit(rate_kind)
+            self.rate_limiter.acquire(rate_kind)
             with ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(fn, **kwargs)
                 try:
