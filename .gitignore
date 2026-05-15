@@ -1,0 +1,16 @@
+# Local secrets
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Virtual env
+.venv/
+
+# Runtime data (adjust if some data should be versioned later)
+data/
+
+# OS/editor
+.DS_Store
