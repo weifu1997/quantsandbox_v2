@@ -1,0 +1,24 @@
+{
+  "version": 2,
+  "partition_mode": "by_ticker",
+  "market_dir": "/root/project/quantsandbox_v2/data/raw/market",
+  "fundamental_dir": "/root/project/quantsandbox_v2/data/raw/fundamentals",
+  "tickers": [
+    "sh600000",
+    "sh600004"
+  ],
+  "ticker_count": 2,
+  "last_start_date": "20240101",
+  "last_end_date": "20260514",
+  "market_rows": 1138,
+  "fundamental_rows": 1138,
+  "warnings": [],
+  "modes": {
+    "market": true,
+    "fundamental": true,
+    "dry_run": false,
+    "check_only": false
+  },
+  "previous_last_end_date": "20260514",
+  "updated_at": "2026-05-15T02:29:43.008853+00:00"
+}
