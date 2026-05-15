@@ -5,6 +5,7 @@ import pandas as pd
 from app.adapters.fundamental_data_adapter import TushareFundamentalDataAdapter
 from app.adapters.market_data_adapter import TushareMarketDataAdapter
 from app.services.dataset_service import build_research_dataset
+from app.utils.rate_limit import TushareRateLimiter
 
 
 class SlowBatchPro:
@@ -46,10 +47,11 @@ def test_tushare_market_adapter_fallbacks_to_single_ticker_on_batch_failure(monk
     adapter.pro = SlowBatchPro()
     adapter.log = logging.getLogger("test")
     adapter.warnings = []
+    adapter.rate_limiter = None
     adapter._symbol_to_ts = TushareMarketDataAdapter._symbol_to_ts
     adapter._symbol_from_ts = TushareMarketDataAdapter._symbol_from_ts
 
-    def fake_call(fn, label, retries=2, timeout_seconds=20.0, **kwargs):
+    def fake_call(fn, label, retries=2, timeout_seconds=20.0, rate_kind="market", **kwargs):
         return fn(**kwargs)
 
     adapter._call_with_retry = fake_call
@@ -62,6 +64,7 @@ def test_tushare_fundamental_adapter_partial_success(monkeypatch) -> None:
     adapter = TushareFundamentalDataAdapter.__new__(TushareFundamentalDataAdapter)
     adapter.log = logging.getLogger("test")
     adapter.warnings = []
+    adapter.rate_limiter = None
     adapter._symbol_to_ts = TushareFundamentalDataAdapter._symbol_to_ts
 
     class Pro:
@@ -71,7 +74,7 @@ def test_tushare_fundamental_adapter_partial_success(monkeypatch) -> None:
             return pd.DataFrame([{"ts_code": ts_code, "trade_date": "20240102", "pe": 10.0, "pb": 1.5}])
 
     adapter.pro = Pro()
-    adapter._call_with_retry = lambda fn, label, retries=2, timeout_seconds=20.0, **kwargs: fn(**kwargs)
+    adapter._call_with_retry = lambda fn, label, retries=2, timeout_seconds=20.0, rate_kind="fundamental", **kwargs: fn(**kwargs)
     df = adapter.fetch_fundamentals(["sh600519", "sz000858"], "20240101", "20240110")
     assert len(df) == 1
     assert adapter.warnings
@@ -104,3 +107,32 @@ def test_dataset_summary_contains_provider_warnings() -> None:
         experiment_id="exp_warn_test",
     )
     assert summary["warnings"]
+
+
+def test_rate_limiter_by_phase() -> None:
+    slept = []
+    current = {'t': 0.0}
+
+    def fake_sleep(seconds: float):
+        slept.append(seconds)
+        current['t'] += seconds
+
+    def fake_monotonic():
+        return current['t']
+
+    limiter = TushareRateLimiter(
+        market_rpm=120.0,
+        fundamental_rpm=60.0,
+        retry_rpm=30.0,
+        sleeper=fake_sleep,
+        monotonic=fake_monotonic,
+    )
+
+    limiter.acquire('market')
+    limiter.acquire('market')
+    limiter.acquire('fundamental')
+    limiter.acquire('fundamental')
+    limiter.acquire('retry')
+    limiter.acquire('retry')
+
+    assert slept == [0.5, 1.0, 2.0]

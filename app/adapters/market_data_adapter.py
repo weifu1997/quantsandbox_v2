@@ -8,6 +8,7 @@ import pandas as pd
 
 from app.config.settings import get_settings
 from app.utils.logging import get_logger, log_duration
+from app.utils.rate_limit import get_tushare_rate_limiter
 
 
 class MarketDataAdapter(Protocol):
@@ -142,6 +143,7 @@ class TushareMarketDataAdapter:
         self.settings = get_settings()
         self.log = get_logger(__name__)
         self.warnings: list[str] = []
+        self.rate_limiter = get_tushare_rate_limiter()
         if not self.settings.tushare_token:
             raise RuntimeError("QS_TUSHARE_TOKEN is required for tushare mode")
         self.ts.set_token(self.settings.tushare_token)
@@ -169,12 +171,18 @@ class TushareMarketDataAdapter:
             return f"sz{s[:-3]}".lower()
         return s.lower()
 
-    def _call_with_retry(self, fn, label: str, retries: int = 2, timeout_seconds: float = 20.0, **kwargs):
+    def _apply_rate_limit(self, rate_kind: str) -> None:
+        limiter = getattr(self, "rate_limiter", None)
+        if limiter is not None:
+            limiter.acquire(rate_kind)
+
+    def _call_with_retry(self, fn, label: str, retries: int = 2, timeout_seconds: float = 20.0, rate_kind: str = "market", **kwargs):
         from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
         last_error = None
         for attempt in range(1, retries + 2):
             t0 = time.time()
+            self._apply_rate_limit(rate_kind)
             with ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(fn, **kwargs)
                 try:
@@ -208,6 +216,7 @@ class TushareMarketDataAdapter:
                 ts_code=joined,
                 start_date=str(start_date),
                 end_date=str(end_date),
+                rate_kind="market",
             )
         except Exception as exc:  # noqa: BLE001
             self.warnings.append(f"batch daily failed: {exc}; falling back to per-ticker fetch")
@@ -221,6 +230,7 @@ class TushareMarketDataAdapter:
                         ts_code=ts_code,
                         start_date=str(start_date),
                         end_date=str(end_date),
+                        rate_kind="retry",
                     )
                     if single is None or single.empty:
                         self.warnings.append(f"daily returned empty for {ticker}")

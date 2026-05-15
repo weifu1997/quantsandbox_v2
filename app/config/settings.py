@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     tushare_token: str | None = None
     tushare_http_url: str | None = None
     tushare_price_adjust: str = "qfq"
+    tushare_market_requests_per_minute: float = 120.0
+    tushare_fundamental_requests_per_minute: float = 90.0
+    tushare_retry_requests_per_minute: float = 30.0
 
     default_benchmark: str = "equal_weight_universe"
     default_commission_bps: float = 10.0

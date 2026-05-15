@@ -8,6 +8,7 @@ import pandas as pd
 
 from app.config.settings import get_settings
 from app.utils.logging import get_logger, log_duration
+from app.utils.rate_limit import get_tushare_rate_limiter
 
 
 class FundamentalDataAdapter(Protocol):
@@ -135,6 +136,7 @@ class TushareFundamentalDataAdapter:
         self.settings = get_settings()
         self.log = get_logger(__name__)
         self.warnings: list[str] = []
+        self.rate_limiter = get_tushare_rate_limiter()
         if not self.settings.tushare_token:
             raise RuntimeError("QS_TUSHARE_TOKEN is required for tushare mode")
         self.ts.set_token(self.settings.tushare_token)
@@ -157,12 +159,18 @@ class TushareFundamentalDataAdapter:
             return s.upper()
         return s.upper()
 
-    def _call_with_retry(self, fn, label: str, retries: int = 2, timeout_seconds: float = 20.0, **kwargs):
+    def _apply_rate_limit(self, rate_kind: str) -> None:
+        limiter = getattr(self, "rate_limiter", None)
+        if limiter is not None:
+            limiter.acquire(rate_kind)
+
+    def _call_with_retry(self, fn, label: str, retries: int = 2, timeout_seconds: float = 20.0, rate_kind: str = "fundamental", **kwargs):
         from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
         last_error = None
         for attempt in range(1, retries + 2):
             t0 = time.time()
+            self._apply_rate_limit(rate_kind)
             with ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(fn, **kwargs)
                 try:
@@ -186,6 +194,7 @@ class TushareFundamentalDataAdapter:
             start_date=str(start_date),
             end_date=str(end_date),
             fields="ts_code,trade_date,pe,pb",
+            rate_kind="fundamental",
         )
         if df is None or df.empty:
             return pd.DataFrame(columns=["date", "ticker", "pe", "pb"])
@@ -210,6 +219,7 @@ class TushareFundamentalDataAdapter:
             start_date=fina_start,
             end_date=str(end_date),
             fields="ts_code,ann_date,end_date,roe",
+            rate_kind="fundamental",
         )
         if df is None or df.empty:
             return pd.DataFrame(columns=["ann_date", "roe"])

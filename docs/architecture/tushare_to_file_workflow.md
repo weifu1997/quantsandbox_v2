@@ -51,26 +51,37 @@ data/raw/
 - `--fundamental-only`
 - `--chunk-size`
 - `--manifest-path`
+- `--checkpoint-path`
+- `--tickers-file`
 - `--check-only`
+- `--precheck-only`
 - `--dry-run`
 
 ### 参数语义说明
 
 - `--check-only`：**纯检查模式**。
-  - 只做参数解析、ticker 解析、manifest 继承检查。
+  - 只做参数解析、ticker 解析、manifest / checkpoint 路径解析。
   - **不调用 Tushare 拉取数据**。
-  - **不写入 parquet 文件**，也**不更新 manifest**。
+  - **不写入 parquet 文件**，也**不更新 manifest / checkpoint**。
+- `--precheck-only`：**预校验模式**。
+  - 扫描现有 parquet，生成 precheck 结果。
+  - 输出 covered / incremental / missing / invalid ticker 分类。
+  - **不执行真正采集**。
 - `--dry-run` **不是纯参数校验**。
   - 它仍会实际调用 Tushare 拉取数据。
-  - 只是**不写入 parquet 文件**，也**不更新 manifest**。
+  - 只是**不写入 parquet 文件**，也**不更新 manifest / checkpoint**。
   - 适合先验证整条采集链路、检查 warning、确认输出规模。
 
 ### 运行行为（当前实现）
 
-当前脚本已经改为：
+当前脚本已经具备以下能力：
 - **按 ticker chunk 分批拉取**
 - **每个 chunk 拉完后立即写盘**
 - **运行中持续输出进度日志**
+- **ticker 级 checkpoint / 恢复**
+- **failed ticker 队列输出**
+- **采集前 precheck 分类**
+- **采集后 validation 验收报告**
 
 典型日志示例：
 - `[market] chunk=1 tickers=1-50 size=50`
@@ -81,17 +92,23 @@ data/raw/
 - 不再需要等全部数据抓完才开始写 parquet
 - 运行中可以通过日志观察 market / fundamentals 当前推进到哪一批
 - 中途失败时，已经完成的 chunk 会保留落盘结果，不至于整轮白跑
+- 再次启动时可以自动跳过已完成 ticker
+- 跑完后可以直接根据 validation 报告判断结果是否可接受
 
 ### 推荐用法
 
 - 主板全量正式采集：建议先用 `--chunk-size 50`
 - 只验证参数 / manifest / ticker 解析：用 `--check-only`
+- 只做采集前扫描 / 增量判断：用 `--precheck-only`
 - 想真实拉数据但不落盘：用 `--dry-run`
-- 想把实验性采集和正式 manifest 隔离：用 `--manifest-path <path>`
+- 想把实验性采集和正式 manifest / checkpoint 隔离：用 `--manifest-path <path>` + `--checkpoint-path <path>`
+- 想对失败票单独补采：用 `--market-only` / `--fundamental-only` 搭配 `--tickers-file <failed.json>`
 
-## Manifest
+## Manifest / Checkpoint / 报告文件
 
-路径：`data/raw/tushare_manifest.json`
+### Manifest
+
+路径默认：`data/raw/tushare_manifest.json`
 
 记录：
 - 输出目录路径
@@ -102,6 +119,56 @@ data/raw/
 - 本次抓取行数
 - warnings
 - 本次采集模式
+
+### Checkpoint
+
+默认路径：与 manifest 同目录，文件名形如：
+- `tushare_manifest.checkpoint.json`
+
+记录：
+- `market_completed_tickers`
+- `fundamental_completed_tickers`
+- `market_failed_tickers`
+- `fundamental_failed_tickers`
+- `stage`
+- `updated_at`
+
+用途：
+- 自动跳过已完成 ticker
+- 中断后恢复
+- failed ticker 输出与补采
+
+### Precheck 报告
+
+默认路径：
+- `tushare_manifest.precheck.json`
+
+输出分类：
+- `covered_tickers`
+- `incremental_tickers`
+- `missing_tickers`
+- `invalid_tickers`
+
+用途：
+- 采集前扫描已有 parquet
+- 自动跳过已覆盖到目标 `end_date` 的 ticker
+- 识别缺失 / 损坏 / 需要增量的 ticker
+
+### Validation 报告
+
+默认路径：
+- `tushare_manifest.validation.json`
+
+输出内容：
+- `missing_tickers`
+- `extra_tickers`
+- `suspicious_row_tickers`
+- `uncovered_range_tickers`
+- `acceptable`
+
+用途：
+- 采集后做结构化验收
+- 判断这一轮结果是否可接受
 
 ## 基本面来源
 
