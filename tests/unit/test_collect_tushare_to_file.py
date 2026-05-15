@@ -7,6 +7,7 @@ from scripts.collect_tushare_to_file import (
     _checkpoint_path,
     _completed_tickers,
     _failed_tickers,
+    _group_tickers_by_start_date,
     _iter_chunks,
     _load_checkpoint,
     _load_manifest,
@@ -79,6 +80,19 @@ def test_iter_chunks() -> None:
         (0, ['a', 'b']),
         (2, ['c', 'd']),
         (4, ['e']),
+    ]
+
+
+def test_group_tickers_by_start_date() -> None:
+    grouped = _group_tickers_by_start_date(
+        ['a', 'b', 'c'],
+        {'a': '20240103', 'c': '20240105'},
+        '20240101',
+    )
+    assert grouped == [
+        ('20240101', ['b']),
+        ('20240103', ['a']),
+        ('20240105', ['c']),
     ]
 
 
@@ -164,6 +178,7 @@ def test_classify_existing_tickers_and_precheck(tmp_path) -> None:
     assert classified['incremental_tickers'] == ['sz000001']
     assert classified['invalid_tickers'] == ['sh600519']
     assert classified['missing_tickers'] == ['sz000002']
+    assert classified['incremental_start_dates']['sz000001'] == '20240103'
 
     precheck = _build_precheck_report(market_dir, fund_dir, ['sh600000', 'sz000001', 'sh600519', 'sz000002'], '20240104', True, False)
     assert precheck['market']['covered_count'] == 1

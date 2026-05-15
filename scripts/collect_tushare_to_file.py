@@ -285,11 +285,12 @@ def _save_precheck_report(settings, report: dict[str, Any], manifest_path: str |
     return path
 
 
-def _classify_existing_tickers(base_dir: Path, tickers: list[str], end_date: str) -> dict[str, list[str]]:
+def _classify_existing_tickers(base_dir: Path, tickers: list[str], end_date: str) -> dict[str, Any]:
     covered: list[str] = []
     incremental: list[str] = []
     missing: list[str] = []
     invalid: list[str] = []
+    incremental_start_dates: dict[str, str] = {}
     target_end = pd.to_datetime(end_date)
 
     for ticker in tickers:
@@ -306,10 +307,12 @@ def _classify_existing_tickers(base_dir: Path, tickers: list[str], end_date: str
             if dates.empty:
                 invalid.append(ticker)
                 continue
-            if dates.max() >= target_end:
+            max_date = dates.max()
+            if max_date >= target_end:
                 covered.append(ticker)
             else:
                 incremental.append(ticker)
+                incremental_start_dates[ticker] = (max_date + pd.Timedelta(days=1)).strftime("%Y%m%d")
         except Exception:
             invalid.append(ticker)
 
@@ -318,6 +321,7 @@ def _classify_existing_tickers(base_dir: Path, tickers: list[str], end_date: str
         "incremental_tickers": sorted(incremental),
         "missing_tickers": sorted(missing),
         "invalid_tickers": sorted(invalid),
+        "incremental_start_dates": incremental_start_dates,
     }
 
 
@@ -355,6 +359,18 @@ def _build_precheck_report(
 def _iter_chunks(items: list[str], chunk_size: int):
     for i in range(0, len(items), chunk_size):
         yield i, items[i : i + chunk_size]
+
+
+def _group_tickers_by_start_date(
+    tickers: list[str],
+    incremental_start_dates: dict[str, str],
+    default_start_date: str,
+) -> list[tuple[str, list[str]]]:
+    grouped: dict[str, list[str]] = {}
+    for ticker in tickers:
+        start_date = incremental_start_dates.get(ticker, default_start_date)
+        grouped.setdefault(start_date, []).append(ticker)
+    return [(start_date, grouped[start_date]) for start_date in sorted(grouped)]
 
 
 def main() -> None:
@@ -430,6 +446,8 @@ def main() -> None:
     precheck_fundamental = precheck_report.get("fundamental") or {}
     precheck_market_covered = set(precheck_market.get("covered_tickers", []))
     precheck_fundamental_covered = set(precheck_fundamental.get("covered_tickers", []))
+    market_incremental_start_dates = precheck_market.get("incremental_start_dates", {})
+    fundamental_incremental_start_dates = precheck_fundamental.get("incremental_start_dates", {})
 
     pending_market_tickers = [t for t in tickers if t not in market_completed and t not in precheck_market_covered]
     pending_fundamental_tickers = [t for t in tickers if t not in fundamental_completed and t not in precheck_fundamental_covered]
@@ -476,47 +494,53 @@ def main() -> None:
 
     if collect_market:
         market_adapter = TushareMarketDataAdapter()
-        for chunk_idx, (offset, chunk) in enumerate(_iter_chunks(pending_market_tickers, args.chunk_size), start=1):
-            print(
-                f"[market] chunk={chunk_idx} tickers={offset + 1}-{offset + len(chunk)} size={len(chunk)}",
-                flush=True,
-            )
-            chunk_df = market_adapter.fetch_daily_bars(chunk, start_date, args.end_date)
-            warnings.extend(getattr(market_adapter, "warnings", []) or [])
-            market_rows_fetched += len(chunk_df)
-            market_rows_written += _write_partitioned(market_dir, chunk_df)
-            completed_in_chunk = _completed_tickers(chunk_df)
-            failed_in_chunk = _failed_tickers(chunk, chunk_df)
-            market_completed.update(completed_in_chunk)
-            market_failed.update(failed_in_chunk)
-            checkpoint["market_completed_tickers"] = sorted(market_completed)
-            checkpoint["fundamental_completed_tickers"] = sorted(fundamental_completed)
-            checkpoint["market_failed_tickers"] = sorted(market_failed)
-            checkpoint["fundamental_failed_tickers"] = sorted(fundamental_failed)
-            checkpoint["stage"] = "market"
-            _save_checkpoint(settings, checkpoint, args.checkpoint_path or None, args.manifest_path or None)
+        market_chunk_idx = 0
+        for group_start_date, group_tickers in _group_tickers_by_start_date(pending_market_tickers, market_incremental_start_dates, start_date):
+            for offset, chunk in _iter_chunks(group_tickers, args.chunk_size):
+                market_chunk_idx += 1
+                print(
+                    f"[market] chunk={market_chunk_idx} tickers={offset + 1}-{offset + len(chunk)} size={len(chunk)} start_date={group_start_date}",
+                    flush=True,
+                )
+                chunk_df = market_adapter.fetch_daily_bars(chunk, group_start_date, args.end_date)
+                warnings.extend(getattr(market_adapter, "warnings", []) or [])
+                market_rows_fetched += len(chunk_df)
+                market_rows_written += _write_partitioned(market_dir, chunk_df)
+                completed_in_chunk = _completed_tickers(chunk_df)
+                failed_in_chunk = _failed_tickers(chunk, chunk_df)
+                market_completed.update(completed_in_chunk)
+                market_failed.update(failed_in_chunk)
+                checkpoint["market_completed_tickers"] = sorted(market_completed)
+                checkpoint["fundamental_completed_tickers"] = sorted(fundamental_completed)
+                checkpoint["market_failed_tickers"] = sorted(market_failed)
+                checkpoint["fundamental_failed_tickers"] = sorted(fundamental_failed)
+                checkpoint["stage"] = "market"
+                _save_checkpoint(settings, checkpoint, args.checkpoint_path or None, args.manifest_path or None)
 
     if collect_fundamental:
         fundamental_adapter = TushareFundamentalDataAdapter()
-        for chunk_idx, (offset, chunk) in enumerate(_iter_chunks(pending_fundamental_tickers, args.chunk_size), start=1):
-            print(
-                f"[fundamental] chunk={chunk_idx} tickers={offset + 1}-{offset + len(chunk)} size={len(chunk)}",
-                flush=True,
-            )
-            chunk_df = fundamental_adapter.fetch_fundamentals(chunk, start_date, args.end_date)
-            warnings.extend(getattr(fundamental_adapter, "warnings", []) or [])
-            fundamental_rows_fetched += len(chunk_df)
-            fundamental_rows_written += _write_partitioned(fundamental_dir, chunk_df)
-            completed_in_chunk = _completed_tickers(chunk_df)
-            failed_in_chunk = _failed_tickers(chunk, chunk_df)
-            fundamental_completed.update(completed_in_chunk)
-            fundamental_failed.update(failed_in_chunk)
-            checkpoint["market_completed_tickers"] = sorted(market_completed)
-            checkpoint["fundamental_completed_tickers"] = sorted(fundamental_completed)
-            checkpoint["market_failed_tickers"] = sorted(market_failed)
-            checkpoint["fundamental_failed_tickers"] = sorted(fundamental_failed)
-            checkpoint["stage"] = "fundamental"
-            _save_checkpoint(settings, checkpoint, args.checkpoint_path or None, args.manifest_path or None)
+        fundamental_chunk_idx = 0
+        for group_start_date, group_tickers in _group_tickers_by_start_date(pending_fundamental_tickers, fundamental_incremental_start_dates, start_date):
+            for offset, chunk in _iter_chunks(group_tickers, args.chunk_size):
+                fundamental_chunk_idx += 1
+                print(
+                    f"[fundamental] chunk={fundamental_chunk_idx} tickers={offset + 1}-{offset + len(chunk)} size={len(chunk)} start_date={group_start_date}",
+                    flush=True,
+                )
+                chunk_df = fundamental_adapter.fetch_fundamentals(chunk, group_start_date, args.end_date)
+                warnings.extend(getattr(fundamental_adapter, "warnings", []) or [])
+                fundamental_rows_fetched += len(chunk_df)
+                fundamental_rows_written += _write_partitioned(fundamental_dir, chunk_df)
+                completed_in_chunk = _completed_tickers(chunk_df)
+                failed_in_chunk = _failed_tickers(chunk, chunk_df)
+                fundamental_completed.update(completed_in_chunk)
+                fundamental_failed.update(failed_in_chunk)
+                checkpoint["market_completed_tickers"] = sorted(market_completed)
+                checkpoint["fundamental_completed_tickers"] = sorted(fundamental_completed)
+                checkpoint["market_failed_tickers"] = sorted(market_failed)
+                checkpoint["fundamental_failed_tickers"] = sorted(fundamental_failed)
+                checkpoint["stage"] = "fundamental"
+                _save_checkpoint(settings, checkpoint, args.checkpoint_path or None, args.manifest_path or None)
 
     checkpoint["stage"] = "completed"
     checkpoint_path = _save_checkpoint(settings, checkpoint, args.checkpoint_path or None, args.manifest_path or None)
