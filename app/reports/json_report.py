@@ -87,6 +87,7 @@ def render_json_report(
         "output_format": "json",
         "config": config,
         "dataset_summary": dataset_summary,
+        "data_mode": dataset_summary.get("data_mode", "unknown"),
         "factor_results": factor_results,
         "backtest_results": backtest_results,
         "factor_diagnostics": diagnostics,
@@ -94,6 +95,7 @@ def render_json_report(
             "factor_count": len(factor_results),
             "best_factor": best_factor,
             "warning_count": len(warnings),
+            "data_mode": dataset_summary.get("data_mode", "unknown"),
         },
         "warnings": warnings,
     }

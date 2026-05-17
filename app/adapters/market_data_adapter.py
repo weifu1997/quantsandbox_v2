@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Protocol
 import time
@@ -9,6 +10,28 @@ import pandas as pd
 from app.config.settings import get_settings
 from app.utils.logging import get_logger, log_duration
 from app.utils.rate_limit import get_tushare_rate_limiter
+
+
+def _classify_retry_reason(exc: Exception | BaseException) -> str:
+    if isinstance(exc, TimeoutError):
+        return "timeout"
+    message = str(exc).lower()
+    if "rate limit" in message or "too many request" in message or "429" in message:
+        return "rate_limit"
+    if "empty" in message:
+        return "empty"
+    return "error"
+
+
+def _retry_backoff_seconds(reason: str, attempt: int) -> float:
+    base_map = {
+        "timeout": 1.5,
+        "rate_limit": 3.0,
+        "empty": 1.0,
+        "error": 1.2,
+    }
+    base = base_map.get(reason, 1.2)
+    return round(base * attempt, 2)
 
 
 class MarketDataAdapter(Protocol):
@@ -21,7 +44,18 @@ class MarketDataAdapter(Protocol):
 
 
 class InMemoryMarketDataAdapter:
-    """Deterministic local adapter for phase-1 development and tests."""
+    """Deterministic local adapter for phase-1 development and tests.
+
+    The simulated path deliberately avoids clean monotonic price ramps so factor IC
+    does not look artificially strong just because the mock market is too smooth.
+    """
+
+    def __init__(self):
+        import hashlib
+        self._hash = hashlib.md5
+
+    def _seed(self, ticker: str) -> int:
+        return int(self._hash(ticker.encode()).hexdigest()[:8], 16)
 
     def fetch_daily_bars(
         self,
@@ -32,25 +66,43 @@ class InMemoryMarketDataAdapter:
         if not tickers:
             return pd.DataFrame(columns=["date", "ticker", "open", "high", "low", "close", "volume", "amount"])
 
+        import random
+
         dates = pd.date_range(pd.to_datetime(start_date), pd.to_datetime(end_date), freq="B")
         rows: list[dict] = []
         for idx, ticker in enumerate(tickers, start=1):
-            base = 10.0 + idx
+            rng = random.Random(self._seed(ticker))
+            price = 18.0 + idx * 3.0 + rng.random() * 8.0
+            base_volume = 800_000 + idx * 60_000 + int(rng.random() * 120_000)
+            phase = rng.random() * math.pi * 2.0
+            cycle = 12 + (idx % 7)
+
             for i, dt in enumerate(dates):
-                close = base + i * 0.15
-                volume = 1_000_000 + idx * 10_000
+                seasonal = math.sin((i / cycle) + phase) * 0.012
+                drift = ((i // 18) % 3 - 1) * 0.0015
+                shock = (rng.random() - 0.5) * 0.035
+                daily_return = seasonal + drift + shock
+
+                open_price = max(1.0, price * (1.0 + (rng.random() - 0.5) * 0.02))
+                close = max(1.0, open_price * (1.0 + daily_return))
+                intraday_span = max(0.003, abs(daily_return) * 0.8 + rng.random() * 0.012)
+                high = max(open_price, close) * (1.0 + intraday_span)
+                low = min(open_price, close) * max(0.7, 1.0 - intraday_span)
+                volume = max(10_000, int(base_volume * (1.0 + (rng.random() - 0.5) * 0.6)))
+
                 rows.append(
                     {
                         "date": dt,
                         "ticker": ticker,
-                        "open": close - 0.1,
-                        "high": close + 0.2,
-                        "low": close - 0.2,
-                        "close": close,
+                        "open": round(open_price, 4),
+                        "high": round(high, 4),
+                        "low": round(low, 4),
+                        "close": round(close, 4),
                         "volume": volume,
-                        "amount": close * volume,
+                        "amount": round(close * volume, 2),
                     }
                 )
+                price = close
         return pd.DataFrame(rows)
 
 
@@ -143,6 +195,7 @@ class TushareMarketDataAdapter:
         self.settings = get_settings()
         self.log = get_logger(__name__)
         self.warnings: list[str] = []
+        self.retry_stats: dict[str, int] = {"attempts": 0, "timeouts": 0, "rate_limits": 0, "empties": 0, "errors": 0}
         self.rate_limiter = get_tushare_rate_limiter()
         if not self.settings.tushare_token:
             raise RuntimeError("QS_TUSHARE_TOKEN is required for tushare mode")
@@ -189,7 +242,22 @@ class TushareMarketDataAdapter:
                     last_error = TimeoutError(f"timeout after {timeout_seconds}s")
                 except Exception as exc:  # noqa: BLE001
                     last_error = exc
-            self.log.warning("%s attempt %s failed: %s", label, attempt, last_error)
+            reason = _classify_retry_reason(last_error)
+            self.retry_stats["attempts"] += 1
+            if reason == "timeout":
+                self.retry_stats["timeouts"] += 1
+            elif reason == "rate_limit":
+                self.retry_stats["rate_limits"] += 1
+            elif reason == "empty":
+                self.retry_stats["empties"] += 1
+            else:
+                self.retry_stats["errors"] += 1
+            backoff = _retry_backoff_seconds(reason, attempt)
+            warning = f"retry_warning|label={label}|attempt={attempt}|reason={reason}|backoff_seconds={backoff}|error={last_error}"
+            self.warnings.append(warning)
+            self.log.warning("%s attempt %s failed (%s), backing off %.2fs: %s", label, attempt, reason, backoff, last_error)
+            if attempt <= retries:
+                time.sleep(backoff)
         raise last_error  # type: ignore[misc]
 
     def fetch_daily_bars(
@@ -199,6 +267,7 @@ class TushareMarketDataAdapter:
         end_date: str,
     ) -> pd.DataFrame:
         self.warnings = []
+        self.retry_stats = {"attempts": 0, "timeouts": 0, "rate_limits": 0, "empties": 0, "errors": 0}
         if not tickers:
             return pd.DataFrame(columns=["date", "ticker", "open", "high", "low", "close", "volume", "amount"])
 

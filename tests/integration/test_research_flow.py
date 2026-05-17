@@ -17,7 +17,9 @@ def test_dataset_service_builds_minimal_dataset() -> None:
     assert "factor:momentum_20d" in dataset.columns
     assert "factor:reversal_5d" in dataset.columns
     assert "future_return_5d" in dataset.columns
+    assert "listed_days" in dataset.columns
     assert summary["rows"] > 0
+    assert summary["data_mode"] == "simulated"
     assert set(summary["factors"]) == {"momentum_20d", "reversal_5d"}
     assert metadata["dataset_id"].startswith("ds_")
     assert get_dataset_metadata(metadata["dataset_id"]) is not None

@@ -9,7 +9,16 @@ import pandas as pd
 from app.adapters.fundamental_data_adapter import build_fundamental_data_adapter
 from app.adapters.market_data_adapter import build_market_data_adapter
 from app.config.settings import get_settings
-from app.domain.data_contracts import normalize_ticker, validate_market_dataframe, validate_research_dataset
+from app.domain.data_contracts import (
+    add_sample_flags,
+    attach_listing_days,
+    factor_column,
+    future_return_column,
+    normalize_ticker,
+    validate_fundamental_dataframe,
+    validate_market_dataframe,
+    validate_research_dataset,
+)
 from app.domain.models import DatasetSummary
 from app.domain.factors.registry import build_default_factor_registry
 from app.repositories.dataset_metadata_repository import create_dataset_metadata
@@ -23,7 +32,15 @@ def add_future_returns(df: pd.DataFrame, horizons: list[int]) -> pd.DataFrame:
     return result
 
 
-def build_dataset_summary(df: pd.DataFrame, tickers: list[str], factors: list[str], horizons: list[int], warnings: list[str] | None = None) -> dict[str, Any]:
+def build_dataset_summary(
+    df: pd.DataFrame,
+    tickers: list[str],
+    factors: list[str],
+    horizons: list[int],
+    warnings: list[str] | None = None,
+    *,
+    data_mode: str | None = None,
+) -> dict[str, Any]:
     invalid_reasons: dict[str, int] = {}
     if not df.empty and "missing_reason" in df.columns:
         counts = df.loc[df["is_valid_sample"] == False, "missing_reason"].value_counts(dropna=True)
@@ -36,6 +53,7 @@ def build_dataset_summary(df: pd.DataFrame, tickers: list[str], factors: list[st
         valid_sample_ratio=float(df["is_valid_sample"].mean()) if (not df.empty and "is_valid_sample" in df.columns) else 0.0,
         invalid_reasons=invalid_reasons,
         warnings=list(warnings or []),
+        data_mode=str(data_mode or "unknown"),
     )
     return asdict(summary)
 
@@ -68,15 +86,19 @@ def build_research_dataset(
     market_adapter = market_adapter or build_market_data_adapter()
     fundamental_adapter = fundamental_adapter or build_fundamental_data_adapter()
     factor_registry = build_default_factor_registry()
+    settings = get_settings()
 
     tickers = [normalize_ticker(t) for t in tickers]
     bars = market_adapter.fetch_daily_bars(tickers, start_date, end_date)
     validate_market_dataframe(bars)
 
     fundamentals = fundamental_adapter.fetch_fundamentals(tickers, start_date, end_date)
+    validate_fundamental_dataframe(fundamentals) if not fundamentals.empty else None
     provider_warnings = []
     provider_warnings.extend(getattr(market_adapter, 'warnings', []) or [])
     provider_warnings.extend(getattr(fundamental_adapter, 'warnings', []) or [])
+
+    data_mode = "simulated" if str(getattr(settings, "market_data_mode", "memory")).lower() == "memory" else "real_file_mode"
 
     if not fundamentals.empty:
         fundamentals["date"] = pd.to_datetime(fundamentals["date"])
@@ -86,22 +108,26 @@ def build_research_dataset(
         dataset = bars.copy()
         provider_warnings.append('fundamental adapter returned empty dataset')
 
+    reference_path = settings.data_dir / "raw" / "reference" / "stock_basic_main_board.parquet"
+    dataset, listing_info = attach_listing_days(dataset, reference_path)
+    if not listing_info.get("listing_days_attached"):
+        provider_warnings.append("listing days unavailable; listed_days filter could not be applied")
+
     dataset = dataset.sort_values(["ticker", "date"]).reset_index(drop=True)
     validate_research_dataset(dataset)
 
     for factor_name in factor_names:
         series = factor_registry.compute(factor_name, dataset)
-        dataset[f"factor:{factor_name}"] = pd.to_numeric(series, errors="coerce")
+        dataset[factor_column(factor_name)] = pd.to_numeric(series, errors="coerce")
 
     dataset = add_future_returns(dataset, horizons)
-    dataset["is_valid_sample"] = True
-    dataset["missing_reason"] = ""
-    for horizon in horizons:
-        col = f"future_return_{horizon}d"
-        missing = dataset[col].isna() & (dataset["missing_reason"] == "")
-        dataset.loc[missing, "is_valid_sample"] = False
-        dataset.loc[missing, "missing_reason"] = f"missing_future_return_{horizon}d"
-
-    summary = build_dataset_summary(dataset, tickers, factor_names, horizons, warnings=provider_warnings)
+    dataset = add_sample_flags(
+        dataset,
+        horizons,
+        min_days=int(settings.min_sample_trading_days),
+        min_listed_days=int(settings.min_sample_listed_days),
+    )
+    summary = build_dataset_summary(dataset, tickers, factor_names, horizons, warnings=provider_warnings, data_mode=data_mode)
+    validate_research_dataset(dataset, factor_names=factor_names, horizons=horizons, require_sample_flags=True)
     metadata = persist_dataset(dataset, experiment_id=experiment_id, summary=summary)
     return dataset, summary, metadata

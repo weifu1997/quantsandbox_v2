@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     default_benchmark: str = "equal_weight_universe"
     default_commission_bps: float = 10.0
     default_slippage_bps: float = 5.0
+    min_sample_trading_days: int = 60
+    min_sample_listed_days: int = 120
 
     model_config = SettingsConfigDict(
         env_prefix="QS_",

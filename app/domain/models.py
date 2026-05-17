@@ -39,6 +39,7 @@ class DatasetSummary:
     valid_sample_ratio: float = 0.0
     invalid_reasons: dict[str, int] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    data_mode: str = "unknown"
 
 
 @dataclass(slots=True)

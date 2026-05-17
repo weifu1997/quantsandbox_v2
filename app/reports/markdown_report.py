@@ -28,6 +28,7 @@ def render_markdown_report(
         "",
         "## Dataset Summary",
         f"- rows: {dataset_summary.get('rows', 0)}",
+        f"- data_mode: {dataset_summary.get('data_mode', 'unknown')}",
         f"- valid_sample_ratio: {dataset_summary.get('valid_sample_ratio', 0.0):.2%}",
         f"- invalid_reasons: {dataset_summary.get('invalid_reasons', {})}",
         "",
