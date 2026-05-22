@@ -11,6 +11,7 @@ from app.domain.data_contracts import factor_column
 from app.domain.models import ExperimentConfig
 from app.repositories.experiment_repository import create_experiment as repo_create_experiment
 from app.repositories.experiment_repository import get_experiment as repo_get_experiment
+from app.services.dataset_service import build_research_dataset
 from app.services.factor_research_service import run_factor_research
 from app.services.report_service import build_experiment_report
 from scripts.run_revgrowth_candidate_review import load_tickers_from_file, build_dataset, apply_filter
@@ -152,10 +153,57 @@ def _run_growth_backtest(start_date: str, end_date: str) -> tuple[dict[str, Any]
     return {factor: result}, filtered
 
 
+def run_strategy_backtest(
+    *,
+    dataset: pd.DataFrame,
+    factor_name: str,
+    top_n: int,
+    rebalance_frequency: str,
+    weighting: str,
+    benchmark: str,
+    commission_bps: float,
+    slippage_bps: float,
+    horizon: int,
+):
+    return run_topn_backtest(
+        dataset=dataset,
+        factor_col=factor_column(factor_name),
+        top_n=top_n,
+        rebalance_frequency=rebalance_frequency,
+        weighting=weighting,
+        benchmark=benchmark,
+        commission_bps=commission_bps,
+        slippage_bps=slippage_bps,
+        horizon=horizon,
+    )
+
+
 def _build_backtest_results(dataset, config: ExperimentConfig) -> dict[str, Any]:
-    """Build backtest results using the growth-line pipeline."""
-    bt_result, _ = _run_growth_backtest(config.start_date, config.end_date)
-    return bt_result
+    """Build backtest results.
+
+    Preserve the governance-approved growth production pipeline for the
+    dedicated growth factor path; otherwise use the modular per-factor backtest
+    path so service-layer tests and generic experiments remain stable.
+    """
+    if config.factors == ["revenue_growth"]:
+        bt_result, _ = _run_growth_backtest(config.start_date, config.end_date)
+        return bt_result
+
+    results: dict[str, Any] = {}
+    horizon = int(config.horizons[0]) if config.horizons else 10
+    for factor_name in config.factors:
+        results[factor_name] = run_strategy_backtest(
+            dataset=dataset,
+            factor_name=factor_name,
+            top_n=config.top_n,
+            rebalance_frequency=config.rebalance_frequency,
+            weighting=config.weighting,
+            benchmark=config.benchmark,
+            commission_bps=config.commission_bps,
+            slippage_bps=config.slippage_bps,
+            horizon=horizon,
+        ).payload
+    return results
 
 
 def _build_report_payload(config: ExperimentConfig, tickers: list[str]) -> dict[str, Any]:
@@ -203,16 +251,26 @@ def _build_growth_dataset_summary(dataset: pd.DataFrame) -> dict[str, Any]:
 def run_experiment(task_id: str, experiment_id: str, config: ExperimentConfig) -> dict[str, Any]:
     try:
         update_task_progress(task_id, 1, 4, "dataset", "building research dataset")
-        backtest_results, dataset = _run_growth_backtest(config.start_date, config.end_date)
-
-        dataset_summary = _build_growth_dataset_summary(dataset)
+        dataset_metadata: dict[str, Any] = {}
+        if config.factors == ["revenue_growth"]:
+            backtest_results, dataset = _run_growth_backtest(config.start_date, config.end_date)
+            dataset_summary = _build_growth_dataset_summary(dataset)
+        else:
+            dataset, dataset_summary, dataset_metadata = build_research_dataset(
+                tickers=config.tickers,
+                start_date=config.start_date,
+                end_date=config.end_date,
+                factor_names=config.factors,
+                horizons=config.horizons,
+                experiment_id=experiment_id,
+            )
+            backtest_results = _build_backtest_results(dataset, config)
 
         update_task_progress(task_id, 2, 4, "factor_research", "running factor validation")
-        growth_horizons = dataset_summary["horizons"]
         factor_results = run_factor_research(
             dataset,
             config.factors,
-            growth_horizons,
+            dataset_summary.get("horizons", config.horizons),
             groups=5,
             split_date=_resolve_split_date(dataset),
         )
@@ -235,7 +293,7 @@ def run_experiment(task_id: str, experiment_id: str, config: ExperimentConfig) -
         mark_task_completed(task_id, result_ref=report["report_id"], message="experiment completed")
         return {
             "dataset_summary": dataset_summary,
-            "dataset_metadata": {},
+            "dataset_metadata": dataset_metadata,
             "factor_results": factor_results,
             "backtest_results": backtest_results,
             "report": report,

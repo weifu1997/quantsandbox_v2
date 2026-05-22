@@ -47,6 +47,7 @@ def build_filtered_universe(limit: int = 1000, round_no: int | None = None) -> d
         "filtered_universe": {
             "ticker_count": len(filtered_tickers),
             "retained_fraction": retained_fraction,
+            "as_of_date": pd.Timestamp.now("UTC").strftime("%Y-%m-%d"),
             "tickers": filtered_tickers,
         },
     }

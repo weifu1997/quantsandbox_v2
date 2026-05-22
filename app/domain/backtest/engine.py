@@ -99,7 +99,14 @@ def _apply_turnover_limit(previous_holdings: dict[str, float], target_holdings: 
     if turnover_limit is None:
         return target_holdings
     if not previous_holdings:
-        return target_holdings
+        # First period: no previous holdings, but still respect turnover limit
+        # by capping total allocation to turnover_limit (treat as max initial deployment).
+        total = sum(target_holdings.values())
+        if total <= turnover_limit + 1e-12:
+            return target_holdings
+        # Scale down proportionally so total allocation = turnover_limit
+        scale = turnover_limit / total
+        return {k: float(v) * scale for k, v in target_holdings.items()}
     realized = turnover_from_holdings(previous_holdings, target_holdings)
     if realized <= turnover_limit + 1e-12:
         return target_holdings

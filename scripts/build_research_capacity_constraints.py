@@ -25,9 +25,9 @@ CAPITAL_ASSUMPTIONS = [
 ]
 LIQUIDITY_THRESHOLDS = {
     "single_position_ratio_warn": 0.01,
-    "single_position_ratio_elevated": 0.15,
+    "single_position_ratio_elevated": 0.03,
     "low_liquidity_exposure_warn": 0.10,
-    "low_liquidity_exposure_elevated": 0.75,
+    "low_liquidity_exposure_elevated": 0.25,
 }
 
 
@@ -198,8 +198,13 @@ def build_report(tickers_file: str | None = None, label: str = "base") -> dict[s
     tickers = load_tickers_from_file(tickers_file) if tickers_file else None
     candidate_capacity = []
     selection_trace = {}
-    tracked_ids = [TRACKED_CANDIDATES["growth_primary"], TRACKED_CANDIDATES["value_primary"], TRACKED_CANDIDATES["value_baseline_reference"]]
-    for capital in CAPITAL_ASSUMPTIONS:
+    tracked_ids = [
+        TRACKED_CANDIDATES["growth_primary"],
+        TRACKED_CANDIDATES["value_primary"],
+        TRACKED_CANDIDATES["value_baseline_reference"],
+    ]
+    capital_assumptions = [c for c in CAPITAL_ASSUMPTIONS if c["label"] != "model_large"]
+    for capital in capital_assumptions:
         for strategy_id in tracked_ids:
             item, trace = build_candidate_capacity(strategy_id, capital["label"], capital["aum"], tickers=tickers, realism_by_strategy=realism_by_strategy)
             candidate_capacity.append(item)

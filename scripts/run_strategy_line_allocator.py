@@ -318,7 +318,8 @@ def choose_allocator_rule(row: pd.Series, rules: list[dict], value_blocked: bool
     return selected
 
 
-def merge_strategy_returns(growth_result: dict, value_result: dict, regime_daily: pd.DataFrame, preset_name: str, deployability_map: dict[str, Any]) -> dict:
+def merge_strategy_returns(growth_result: dict, value_result: dict, regime_daily: pd.DataFrame, preset_name: str, deployability_map: dict[str, Any] | None = None) -> dict:
+    deployability_map = deployability_map or {}
     preset = ALLOCATOR_PRESETS[preset_name]
     growth_returns = growth_result["backtest"].get("returns_by_rebalance_date", {})
     value_returns = value_result["backtest"].get("returns_by_rebalance_date", {})

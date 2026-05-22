@@ -1,3 +1,4 @@
+from functools import lru_cache
 from pathlib import Path
 
 from pydantic import model_validator
@@ -36,6 +37,8 @@ class Settings(BaseSettings):
     min_sample_trading_days: int = 60
     min_sample_listed_days: int = 120
 
+    cors_origins: list[str] = ["http://127.0.0.1:5173", "http://localhost:5173"]
+
     model_config = SettingsConfigDict(
         env_prefix="QS_",
         env_file=".env",
@@ -56,6 +59,7 @@ class Settings(BaseSettings):
         return self
 
 
+@lru_cache(maxsize=1)
 def get_settings() -> Settings:
     settings = Settings()
     settings.data_dir.mkdir(parents=True, exist_ok=True)

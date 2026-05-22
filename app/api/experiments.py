@@ -10,7 +10,12 @@ from app.services.experiment_service import get_experiment, submit_experiment
 
 router = APIRouter(prefix="/api/experiments", tags=["experiments"])
 
-TICKERS_FILE = "data/reports/filtered_universe_growth_amount_bottom_50pct_latest.json"
+from app.config.settings import get_settings
+
+
+def _get_tickers_file() -> str:
+    settings = get_settings()
+    return str(settings.reports_dir / "filtered_universe_growth_amount_bottom_50pct_latest.json")
 
 
 @router.get("/tickers")
@@ -18,7 +23,7 @@ def read_growth_tickers():
     """Return the pre-filtered growth-universe ticker list."""
     import json
     from pathlib import Path
-    path = Path(TICKERS_FILE)
+    path = Path(_get_tickers_file())
     if not path.exists():
         raise HTTPException(status_code=404, detail="ticker file not found")
     data = json.loads(path.read_text(encoding="utf-8"))

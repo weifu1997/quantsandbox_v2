@@ -101,7 +101,11 @@ def build_research_dataset(
     validate_market_dataframe(bars)
 
     fundamentals = fundamental_adapter.fetch_fundamentals(tickers, start_date, end_date)
-    validate_fundamental_dataframe(fundamentals) if not fundamentals.empty else None
+    if not fundamentals.empty:
+        for col in ["pe", "pb", "roe", "roa", "gross_margin", "revenue_growth", "profit_growth"]:
+            if col not in fundamentals.columns:
+                fundamentals[col] = pd.NA
+        validate_fundamental_dataframe(fundamentals)
     provider_warnings = []
     provider_warnings.extend(getattr(market_adapter, 'warnings', []) or [])
     provider_warnings.extend(getattr(fundamental_adapter, 'warnings', []) or [])
