@@ -1,5 +1,9 @@
 # Filtered Rerun Chain Plan (`amount_bottom_20pct`)
 
+> **文档状态：历史方案**
+> 
+> 本文对应某一阶段的 filtered rerun 实验配置规划。当前系统已经继续演进到更完整的 growth/deployability/allocator 链路，因此本文主要作为历史试验方案保留。
+
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
 **Goal:** Use the most promising relative-liquidity pruning setting (`amount_bottom_20pct`) as the first full filtered rerun configuration, so growth/value candidates can be reevaluated under a tradability-aware universe rather than the original broad universe.

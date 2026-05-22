@@ -1,5 +1,9 @@
 # Relative Liquidity Tail-Pruning Plan
 
+> **文档状态：部分实现**
+> 
+> relative-liquidity pruning 的核心方向已经进入当前 filtered universe / growth universe 工件链路，但本文仍包含原始设计与试验性描述，因此标记为“部分实现”。
+
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
 **Goal:** Replace the overly destructive hard liquidity floors with a gentler relative-liquidity pruning method that removes the worst liquidity tail while preserving enough universe breadth for the tracked growth/value lines to remain research-meaningful.

@@ -1,5 +1,9 @@
 # QuantSandbox V2 Deployability / Allocator / Pipeline 交付说明
 
+> **文档状态：已实现（交付说明）**
+> 
+> 文中描述的大部分交付已经在当前后端 report API、前端治理面板、allocator/gating/report 链路中落地。本文应作为“已交付内容说明”，而不是未来计划。
+
 ## 概览
 
 本次交付已把 **deployability 治理结果** 从研究脚本层，打通到：

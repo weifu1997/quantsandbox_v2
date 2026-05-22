@@ -1,5 +1,9 @@
 # Rolling Review → Decision Summary Design
 
+> **文档状态：部分实现**
+> 
+> decision summary JSON/Markdown、tracked candidate 规范化、deployability 与 realism/capacity 消费链已部分落地；本文仍同时包含初始设计意图和未完全冻结的扩展方向，因此属于“部分实现”。
+
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
 **Goal:** Define a standard output structure and generation flow that converts rolling strategy reviews into a compact, repeatable research decision summary for `quantsandbox_v2`.

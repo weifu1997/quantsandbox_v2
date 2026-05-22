@@ -1,5 +1,9 @@
 # 真正收益导向长期实施总纲（QuantSandbox v2）
 
+> **文档状态：历史方案**
+> 
+> 本文反映的是某一阶段围绕“真正收益导向”进行的大纲式规划。由于当前 working config、growth/value 角色和执行口径已经继续演进，本文更适合作为历史背景，而不是当前唯一执行总纲。
+
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
 **Goal:** 把当前分散的研究结论、working config、decision/realism/capacity 报告层，收敛成一套围绕“真正收益”“长期稳定赚钱”“growth 作为可执行主线”“value 作为可选增益”的正式实施总纲，并据此驱动后续开发、评审、验证与运行治理。

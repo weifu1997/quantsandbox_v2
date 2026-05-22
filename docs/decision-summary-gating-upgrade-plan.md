@@ -1,5 +1,9 @@
 # Decision Summary Gating Upgrade Plan
 
+> **文档状态：部分实现**
+> 
+> gating/realism/capacity 已经进入当前系统的重要判断链，但本文描述的顶层 machine-readable blocks（如 `working_config_recommendation`、`additive_eligibility`）未必已全部冻结为最终 schema，因此属于“部分实现”。
+
 > 目标：把 realism / capacity 从展示层升级为 decision summary 的主判断输入，让系统对 working config、加仓资格、升级阻塞、降级触发给出机器可读且可执行的结论。
 
 ## 当前状态

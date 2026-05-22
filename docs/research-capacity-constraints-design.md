@@ -1,5 +1,9 @@
 # Capacity Assumption & Liquidity Constraint Design
 
+> **文档状态：部分实现**
+> 
+> capacity constraints 报告、capital buckets、liquidity thresholds 与下游 decision/realism 消费链已部分落地到当前脚本与报告产物；本文仍保留未来扩展与口径说明，因此属于“部分实现”。
+
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
 **Goal:** Convert the newly surfaced liquidity realism findings into explicit capital-scale assumptions and enforceable liquidity constraints, so `quantsandbox_v2` can move from risk discovery to operational portfolio limits.

@@ -1,5 +1,9 @@
 # Value Line Future Review Plan (top_n=20)
 
+> **文档状态：历史方案**
+> 
+> 本文对应某一阶段对 value line 的 forward review 计划。当前系统重点已更多转向 growth working config、deployability、allocator 与统一治理链，因此本文保留为历史 review 计划背景。
+
 **Goal:** Continue forward review of the official value-line primary candidate under the new operating default (`top_n=20`) without reopening governance or allocator work.
 
 **Current official state:**

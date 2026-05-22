@@ -1,5 +1,9 @@
 # Realism Stress-Test Layer Design
 
+> **文档状态：部分实现**
+> 
+> realism report 层、decision summary 消费、部分 execution/cost/concentration realism 信号已落地；但本文仍包含设计性内容与未来扩展假设，因此属于“部分实现”。
+
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
 **Goal:** Define a first practical realism-stress layer for `quantsandbox_v2` so the decision-summary system can move beyond research-only metrics and start judging whether tracked candidates remain plausible under more realistic trading constraints.

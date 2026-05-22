@@ -1,4 +1,9 @@
 # Dynamic Impact v1 Implementation Plan
+
+> **文档状态：已实现（核心能力已落地）**
+> 
+> 当前 `dynamic_impact_model.py` 与 `backtest/engine.py` 已实现 v1 核心能力：参与率分桶、impact bps、主收益扣回、execution diagnostics。本文保留作为设计来源与实现说明，但已不再是“待执行计划”。
+
 **Document Version:** 1.1
 **Date:** 2026-05-19
 **Author:** Hermes (System)

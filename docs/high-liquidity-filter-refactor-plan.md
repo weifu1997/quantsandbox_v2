@@ -1,5 +1,9 @@
 # High-Liquidity Filter Refactor Plan
 
+> **文档状态：历史方案**
+> 
+> 当前系统后续已转向 relative-liquidity tail pruning、filtered rerun 和 growth working config 路径；本文保留为当时探索“高流动性过滤重构”的历史方案背景。
+
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
 **Goal:** Raise the liquidity quality of the candidate research universe so the tracked growth/value candidates have a chance to survive realism and capacity constraints at more realistic capital scales.

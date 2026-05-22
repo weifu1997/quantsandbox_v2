@@ -1,31 +1,42 @@
-# 指标口径（Phase 1，当前实现）
+# 指标口径（当前实现）
 
-这份文档描述 **当前已经实现** 的回测与报告指标口径，重点是把代码中的真实定义写清楚，避免文档和实现出现偏差。
+这份文档描述 `QuantSandbox_v2` **当前已经实现** 的回测与报告指标口径。重点不是描述最初的 Phase 1 简化设计，而是把当前代码里真实存在的收益、成本、换手、执行与诊断口径写清楚，避免文档继续误导成“只有简单 TopN + 简单成本”的系统。
 
-当前主要对应代码：
+主要对应代码：
+
 - `app/domain/backtest/performance_metrics.py`
-- `app/domain/backtest/benchmark.py`
+- `app/domain/backtest/cost_model.py`
+- `app/domain/backtest/dynamic_impact_model.py`
 - `app/domain/backtest/engine.py`
+- `app/domain/backtest/benchmark.py`
 
 ---
 
-## 1. 当前指标使用范围
+## 1. 当前指标适用范围
 
 当前这些指标主要用于：
+
 - TopN 回测结果摘要
 - benchmark 对照
 - report JSON / Markdown 输出
+- ledger / execution diagnostics 上游数据
 
 当前主回测引擎入口：
+
 - `run_topn_backtest(...)`
 
-在 Phase 1 中，指标口径强调：
-- 简单
-- 一致
-- 可测试
-- 不引入过早复杂化
+当前系统已经不是“纯简化研究回测”，而是带有以下扩展能力的回测引擎：
 
-而不是追求所有真实交易细节都完全建模。
+- turnover limit
+- board-lot 约束
+- delayed execution return
+- volatility-aware execution slippage
+- dynamic impact cost
+- per-name accounting
+- cash accounting
+- execution diagnostics
+
+因此文档中的成本与收益口径必须同时覆盖这些实现事实。
 
 ---
 
@@ -34,140 +45,137 @@
 ### `periods_per_year(freq)`
 
 当前映射：
+
 - `D -> 252`
 - `W -> 52`
 - `M -> 12`
 - 其它未知值默认回落到 `52`
 
 说明：
-- Phase 1 里，年化相关指标完全依赖这个频率映射
-- 因此 strategy 与 benchmark 必须共享同一 `rebalance_frequency`
+
+- 所有年化收益、年化波动率、Sharpe 都依赖这个映射
+- strategy 与 benchmark 必须共享同一 `rebalance_frequency`
 
 ---
 
 ## 3. `total_return`
 
 ### 函数
+
 - `total_return(equity_curve: list[float]) -> float`
 
 ### 当前实现口径
+
 - 若 `equity_curve` 为空，返回 `0.0`
 - 否则返回：
   - `equity_curve[-1] - 1.0`
 
-### 含义
-假设净值曲线起点隐含为 `1.0`，则总收益率等于末尾净值减 1。
+含义：
 
-### 示例
-- 若 `equity_curve = [1.02, 1.05, 1.10]`
-- 则 `total_return = 0.10`
-
-说明：
-- 当前不单独存储初始净值点 `1.0`
-- 直接基于累积后的曲线末点计算
+- 净值曲线隐含初始值为 `1.0`
+- 总收益率 = 末尾净值 - 1
 
 ---
 
 ## 4. `annual_return`
 
 ### 函数
+
 - `annual_return(period_returns: list[float], periods_per_year: int) -> float`
 
 ### 当前实现口径
+
 - 若 `period_returns` 为空，返回 `0.0`
 - 若 `periods_per_year <= 0`，返回 `0.0`
 - 否则：
-  1. 将 period return 序列复利成净值
+  1. 将 period returns 复利成净值
   2. `years = len(period_returns) / periods_per_year`
   3. 返回：
-     - `equity ** (1 / years) - 1`
+     - `equity ** (1 / years) - 1.0`
 
-### 重要前提
-`period_returns` 必须已经是**与评估频率一致**的收益序列，例如：
+重要前提：
 
-- 日频回测 -> 传日收益 + `252`
-- 周频回测 -> 传周收益 + `52`
-- 月频回测 -> 传月收益 + `12`
-
-### 不允许的错误口径
-- strategy 用周频调仓，但 annual return 却拿日收益去年化
-- benchmark 用日频累计，而 strategy 用周频累计，再直接比较年化结果
+- `period_returns` 必须已经和评估频率一致
+- 周频回测要传周收益 + `52`
+- 月频回测要传月收益 + `12`
 
 ---
 
 ## 5. `annual_volatility`
 
 ### 函数
+
 - `annual_volatility(period_returns: list[float], periods_per_year: int) -> float`
 
 ### 当前实现口径
+
 - 若样本数 `< 2`，返回 `0.0`
 - 若 `periods_per_year <= 0`，返回 `0.0`
 - 否则：
-  1. 用总体方差（分母为 `n`，不是 `n-1`）计算 period return 方差
-  2. 对方差开根号得到 period volatility
+  1. 用总体方差（分母 `n`）计算 period returns 方差
+  2. 开根号得到 period volatility
   3. 再乘 `sqrt(periods_per_year)` 年化
 
-### 说明
-- 当前实现使用总体方差，不做无偏样本方差修正
-- 这在 Phase 1 是一个明确且稳定的口径，只要 strategy / benchmark 一致即可
+说明：
+
+- 当前实现使用 `ddof=0`
+- 这是系统当前固定口径，不是文档假设
 
 ---
 
 ## 6. `sharpe_ratio`
 
 ### 函数
+
 - `sharpe_ratio(period_returns: list[float], periods_per_year: int, risk_free_rate: float = 0.0) -> float`
 
 ### 当前实现口径
-- 先计算 `annual_volatility(...)`
-- 若年化波动率几乎为 0（`<= 1e-12`），返回 `0.0`
-- 否则：
+
+- 先算 `annual_volatility(...)`
+- 若波动率极小（`<= 1e-12`），返回 `0.0`
+- 否则返回：
   - `(annual_return - risk_free_rate) / annual_volatility`
 
-### 默认假设
-- `risk_free_rate = 0.0`
+默认：
 
-### 说明
-- 当前 Sharpe 使用年化收益 / 年化波动率
-- 不做更复杂的风险自由利率曲线处理
+- `risk_free_rate = 0.0`
 
 ---
 
 ## 7. `max_drawdown`
 
 ### 函数
+
 - `max_drawdown(equity_curve: list[float]) -> float`
 
 ### 当前实现口径
-- 若净值曲线为空，返回 `0.0`
-- 否则遍历净值曲线：
-  - 维护历史峰值 `peak`
-  - 计算当前回撤 `dd = value / peak - 1`
-  - 记录最差回撤
-- 最终返回回撤绝对值
 
-### 输出特点
+- 若净值曲线为空，返回 `0.0`
+- 遍历净值曲线，维护 `peak`
+- 当前回撤：
+  - `dd = value / peak - 1.0`
+- 记录最差回撤后返回其绝对值
+
+输出特点：
+
 - 返回值为**正数**
 - 例如最差回撤是 `-0.18`，函数返回 `0.18`
-
-说明：
-- 这是一个需要在文档里明确的实现口径，因为有些系统会保留负号
 
 ---
 
 ## 8. `win_rate`
 
 ### 函数
+
 - `win_rate(period_returns: list[float]) -> float`
 
 ### 当前实现口径
-- 若收益序列为空，返回 `0.0`
-- 否则：
-  - 统计 `x > 0` 的 period return 占比
 
-### 说明
-- 当前只把**严格大于 0** 计为赢
+- 若收益序列为空，返回 `0.0`
+- 否则统计 `x > 0` 的 period return 占比
+
+说明：
+
 - `0` 不计为赢
 
 ---
@@ -175,80 +183,281 @@
 ## 9. `turnover_from_holdings`
 
 ### 函数
+
 - `turnover_from_holdings(previous: dict[str, float], current: dict[str, float]) -> float`
 
 ### 当前实现口径
-- 对前后两期所有持仓名称取并集
-- 对每个标的计算权重变化绝对值
+
+- 对前后两期持仓 ticker 做并集
+- 计算每个 ticker 的权重变化绝对值
 - 最终求和
 
 即：
+
 - `sum(abs(current_w - previous_w))`
 
-### 示例
-若：
-- 上期：`{"a": 0.5, "b": 0.5}`
-- 本期：`{"b": 0.5, "c": 0.5}`
-
-则换手率为：
-- `|0 - 0.5| + |0.5 - 0.5| + |0.5 - 0| = 1.0`
-
 说明：
-- 当前是简单权重变化口径
-- 不做更复杂的成交量/价格冲击修正
+
+- 这是**组合权重变化口径**
+- 不是成交金额 / AUM 的二次换算口径
 
 ---
 
-## 10. 成本模型口径
+## 10. turnover limit 口径
 
-当前成本来自：
+当前回测引擎支持：
+
+- 年化换手上限
+
+来源：
+
+- dataset attrs：`growth_turnover_annual_limit`
+
+当前换算方式：
+
+1. 先根据 `rebalance_frequency` 计算 `periods_per_year`
+2. 单期换手上限：
+   - `annual_limit / periods_per_year`
+
+例如：
+
+- 年化换手上限 = `3.0`
+- 周频 `W -> 52`
+- 单期上限约 = `3.0 / 52 = 0.0577`
+
+### 当前一个重要实现细节
+
+首期调仓现在也受 turnover limit 约束。
+
+当前实现：
+
+- 若 `previous_holdings` 为空
+- 不再直接 100% 满仓
+- 而是把首期目标权重按 `turnover_limit` 比例缩放
+
+这点会影响：
+
+- 首期建仓速度
+- annualized turnover
+- growth line 历史结果与旧版本的对比
+
+---
+
+## 11. 基础交易成本口径
+
+基础交易成本仍然来自：
+
 - `estimate_transaction_cost(turnover, commission_bps, slippage_bps)`
 
-在主回测流程里：
-1. 先根据前后持仓计算 `turnover`
-2. 再根据手续费 + 滑点计算成本
-3. `net = gross - cost`
+在主回测中：
 
-当前采用的 Phase 1 简化口径为：
-- `cost = turnover * (commission_bps + slippage_bps) / 10000`
+1. 先计算 `turnover`
+2. 基础成本：
+   - `base_cost = estimate_transaction_cost(...)`
 
-说明：
-- 不引入冲击成本分层
-- 不做单边/双边更复杂拆分
-- 先保证口径统一，后续再扩展
+其本质仍是基于：
+
+- 换手率
+- 佣金 bps
+- 滑点 bps
+
+但这已经不是最终总成本。
 
 ---
 
-## 11. Benchmark 口径
+## 12. 执行附加滑点口径（extra execution slippage）
 
-### 当前 benchmark 入口
+当前引擎支持 execution-aware 额外滑点：
+
+- `_extra_execution_cost_bps(...)`
+
+依赖字段：
+
+- `next_open_price`
+- `open`
+- `rolling_vol_20d`
+- `rolling_vol_20d_hist_q80`
+
+依赖 execution config attrs：
+
+- `execution_tick_size`
+- `execution_base_tick_slippage_ticks`
+- `execution_high_vol_extra_tick_slippage_ticks`
+- `execution_high_vol_quantile`
+- `execution_minimum_roundtrip_ticks`
+
+当前逻辑：
+
+- 默认每笔交易至少有 base tick slippage
+- 若滚动波动率进入高波动区间，再加 extra ticks
+- 最终换算成 bps
+- 对当前 rebalance 交易组合取平均附加 bps
+
+该附加 bps 会叠加到基础 `slippage_bps` 上，形成：
+
+- `base_cost = estimate_transaction_cost(turnover, commission_bps, slippage_bps + extra_slippage_bps)`
+
+---
+
+## 13. 动态冲击成本口径（dynamic impact cost）
+
+当前系统已经实现动态冲击成本：
+
+- `estimate_dynamic_impact_bps(trade_notional, daily_amount)`
+
+对应模块：
+
+- `app/domain/backtest/dynamic_impact_model.py`
+
+当前逻辑：
+
+1. 根据单笔 trade notional 与当日成交额 `amount`
+2. 计算 participation rate
+3. 按 participation bucket 映射到 impact bps：
+   - `very_light`
+   - `light`
+   - `medium`
+   - `heavy`
+   - `extreme`
+4. 将每个 ticker 的 impact cost 累加为本期 `impact_cost`
+
+当前总成本：
+
+- `cost = base_cost + impact_cost`
+
+因此当前净收益口径是：
+
+- `net = gross - cost`
+
+不是旧文档里描述的“只有简单成本模型”。
+
+---
+
+## 14. delayed execution / return 列口径
+
+当前回测引擎会根据 execution config 决定使用哪一类 return 列：
+
+- 若 execution config enabled 且 dataset 中存在 `delayed_future_return_{horizon}d`
+  - 优先使用 delayed return 列
+- 否则使用：
+  - `future_return_{horizon}d`
+
+这意味着：
+
+- strategy return 口径会因为 execution config 而改变
+- benchmark 也会共享相同 `return_col`
+
+因此 strategy 与 benchmark 的比较仍然在同一 return 语义下进行。
+
+---
+
+## 15. board-lot 约束口径
+
+当前引擎支持 A 股一手约束：
+
+- 默认 lot size = `100`
+
+来源：
+
+- dataset attrs：
+  - `board_lot_enabled`
+  - `board_lot_size`
+
+当前实现：
+
+1. 按目标权重换算 target notional
+2. 使用 `next_open_price`，若无则 fallback `open`
+3. 计算原始股数
+4. 按 `board_lot_size` 向下取整
+5. 重新计算 actual notional
+6. 以 `actual_notional / equity` 回写调整后权重
+
+输出：
+
+- `position_details_by_rebalance_date`
+
+记录：
+
+- `shares`
+- `price`
+- `target_notional`
+- `actual_notional`
+- `skipped`
+
+---
+
+## 16. 逐股与现金核算口径
+
+当前引擎不仅输出聚合收益，还输出逐股和现金核算：
+
+### 16.1 逐股毛贡献
+
+- `per_name_gross_contribution_by_rebalance_date`
+
+### 16.2 逐股会计核算
+
+- `per_name_accounting_by_rebalance_date`
+
+包含：
+
+- `start_notional`
+- `target_notional`
+- `gross_pnl_cny`
+- `trade_abs_notional`
+- `trade_net_notional`
+- `allocated_cost_cny`
+- `post_trade_notional`
+- `net_pnl_cny`
+- `end_notional`
+
+### 16.3 现金核算
+
+- `cash_accounting_by_rebalance_date`
+
+包含：
+
+- `cash_start`
+- `cash_trade_flow`
+- `cash_end`
+- `cost_cny`
+- `gross_pnl_total_cny`
+- `net_pnl_total_cny`
+
+这意味着当前系统已经具备面向 ledger/report 的较细粒度会计输出，而不是只有摘要指标。
+
+---
+
+## 17. benchmark 口径
+
+当前 benchmark 入口：
+
 - `run_benchmark(dataset, return_col, benchmark, rebalance_frequency)`
 
-### 当前已实现 benchmark
+当前已实现 benchmark：
+
 - `equal_weight_universe`
 
-### `run_equal_weight_universe_benchmark(...)` 当前实现口径
+当前 benchmark 口径：
+
 1. 使用与 strategy 相同的 `return_col`
 2. 使用与 strategy 相同的 `rebalance_frequency`
-3. 对每个 rebalance date：
-   - 取该横截面所有样本的 return 均值
+3. 对每个 rebalance date 求横截面平均收益
 4. 输出：
-   - `dates`
    - `returns`
    - `equity_curve`
 
-### 重要约束
-- benchmark 必须与 strategy 使用同一 `rebalance_frequency`
-- benchmark 只保留重采样后的日期收益
-- 不允许 strategy 用周频而 benchmark 仍按全量日频累计
+这意味着：
 
-这点当前在实现和文档中是一致的。
+- benchmark 与 strategy 共享同一收益列语义
+- 不允许 strategy 用 delayed return、benchmark 仍用另一种口径
 
 ---
 
-## 12. `run_topn_backtest(...)` 当前输出指标
+## 18. `run_topn_backtest(...)` 当前主要输出
 
-当前 TopN 回测主输出 payload 至少包括：
+当前 TopN 回测 payload 至少包括：
+
+### 18.1 摘要指标
 
 - `factor_name`
 - `horizon`
@@ -261,70 +470,98 @@
 - `max_drawdown`
 - `sharpe`
 - `turnover`
+- `annualized_one_way_turnover`
 - `win_rate`
 - `cost_paid`
+- `base_cost_paid`
+- `impact_cost_paid`
+- `total_cost_paid_with_impact`
+- `excess_return_vs_benchmark`
+
+### 18.2 持仓与收益轨迹
+
 - `holdings_by_rebalance_date`
+- `returns_by_rebalance_date`
+- `gross_return_by_rebalance_date`
+- `turnover_by_rebalance_date`
+- `cost_by_rebalance_date`
 - `equity_curve`
 - `benchmark_equity_curve`
 - `benchmark_returns`
-- `excess_return_vs_benchmark`
 
-### 指标来源
-- `annual_return` -> `annual_return(...)`
-- `total_return` -> `total_return(...)`
-- `max_drawdown` -> `max_drawdown(...)`
-- `sharpe` -> `sharpe_ratio(...)`
-- `turnover` -> 各调仓期换手率均值
-- `win_rate` -> `win_rate(...)`
-- `cost_paid` -> 每期成本累计和
-- `excess_return_vs_benchmark` ->
-  - `strategy total_return - benchmark total_return`
+### 18.3 执行与持仓细节
 
-说明：
-- `excess_return_vs_benchmark` 当前使用的是**总收益差**，不是 annualized alpha
-- 这是一个已实现、且应在文档中明确的 Phase 1 口径
+- `position_details_by_rebalance_date`
+- `per_name_gross_contribution_by_rebalance_date`
+- `per_name_accounting_by_rebalance_date`
+- `cash_accounting_by_rebalance_date`
+- `execution_by_rebalance_date`
+- `execution_diagnostics`
 
 ---
 
-## 13. 当前实现中的明确简化
+## 19. `execution_diagnostics` 当前口径
 
-### 13.1 不做更复杂的风险指标体系
-当前没有：
-- Sortino
-- Calmar
-- Information Ratio
-- Alpha / Beta
-- Tracking Error
+当前回测结果中会输出：
 
-### 13.2 不做成交层级微观模拟
+- `impact_model`
+- `assumed_fill_mode`
+- `bar_delay`
+- `partial_fill_model_enabled`
+- `avg_participation_rate`
+- `p90_participation_rate`
+- `max_participation_rate`
+- `avg_dynamic_impact_bps`
+- `p90_dynamic_impact_bps`
+- `max_dynamic_impact_bps`
+- `bucket_counts`
+- `impact_cost_paid`
+- `total_cost_paid_with_impact`
+- `turnover_limit_per_rebalance`
+
+这些字段已经是前端治理/ledger/realism 层的重要上游输入，不应继续被文档省略。
+
+---
+
+## 20. 当前实现中的明确简化
+
+虽然当前回测比旧版本复杂很多，但仍有明确简化：
+
+### 20.1 不是撮合级微观交易模拟
+
 当前没有：
-- 撮合引擎
+
+- 真实撮合引擎
 - 涨跌停成交约束
-- 容量限制
-- 冲击成本曲线
+- partial fill 真正落地
+- order book / queue position 模拟
 
-### 13.3 不区分 gross return / net return 序列的独立输出
-当前引擎内部会算：
-- gross
-- cost
-- net
+### 20.2 impact model 仍是分桶近似
 
-但最终 report 主要暴露的是 net 结果和累计成本。
+当前动态冲击是：
 
-### 13.4 benchmark 只有一个实现
+- participation rate -> bucket -> impact bps
+
+不是连续市场冲击曲线模型。
+
+### 20.3 benchmark 仍然只有一个实现
+
 当前仅支持：
+
 - `equal_weight_universe`
 
 ---
 
-## 14. Phase 1 红线
+## 21. 当前必须坚持的口径红线
 
-为了避免后续口径漂移，当前应坚持这几条：
+为了避免后续继续漂移，当前文档应固定以下红线：
 
-1. 年化收益、年化波动率、Sharpe 只能有一份实现来源
-2. strategy 与 benchmark 必须共享相同频率口径
-3. 最大回撤必须明确是返回正数绝对值
-4. turnover 口径必须固定为持仓权重绝对变化之和
-5. cost model Phase 1 先保持统一简化，不随不同调用点改变
+1. 年化收益、波动率、Sharpe 只有一份实现来源
+2. strategy 与 benchmark 必须共享同一频率与同一 return 列口径
+3. 最大回撤返回**正数绝对值**
+4. turnover 口径固定为持仓权重变化绝对值求和
+5. 总成本 = 基础交易成本 + execution 附加滑点 + 动态冲击成本
+6. 首次调仓当前也受 turnover limit 约束
+7. board-lot 向下取整是当前真实实现，不是可选注释行为
 
-只要这些红线不被破坏，Phase 1 的回测结果口径就是稳定的。
+只要这些红线不变，系统的回测与报告口径才是稳定的。
