@@ -106,7 +106,90 @@ data/raw/
 
 ## Manifest / Checkpoint / 报告文件
 
-### Manifest
+### 运行保护与状态文件
+
+为了让采集链路具备更稳定的长期运维能力，当前额外具备三层保护：
+
+- **单实例运行锁**：默认 manifest 同目录下会创建 `tushare_manifest.lock`，防止两个采集进程同时写同一批 parquet / checkpoint / manifest。
+- **JSON 状态原子写入**：`manifest / checkpoint / precheck / validation / failed_tickers` 统一先写临时文件再 replace，避免中断时留下半写入 JSON。
+- **SQLite run-state**：每次正式采集 run 都会在 `settings.db_path` 对应的 SQLite 中写入 `collection_runs` 记录，持久化运行状态、阶段、计数、错误与结束时间。
+
+如果启动时提示 `collection lock already exists`，通常说明：
+- 另一条采集任务正在运行；或
+- 上一次异常退出后遗留了 lock 文件。
+
+遇到第二种情况，先确认没有同 manifest 的采集进程仍在跑，再手动删除对应 `.lock` 文件。
+
+### SQLite run-state
+
+当前会在 SQLite 中维护 `collection_runs` 表，字段包括：
+- `run_id`
+- `manifest_path`
+- `checkpoint_path`
+- `status`
+- `stage`
+- `start_date` / `end_date`
+- `tickers_json`
+- `modes_json`
+- `metrics_json`
+- `warning_count`
+- `error`
+- `lock_path`
+- `started_at` / `updated_at` / `finished_at`
+
+统一状态模型当前至少覆盖：
+- `precheck_only`
+- `ready`
+- `running`
+- `partial_success`
+- `completed`
+- `failed`
+- `interrupted`
+- `blocked_by_lock`
+
+映射规则当前已打通到：
+- SQLite run-state `status` / `stage`
+- run-report `unified_status` / `final_status`
+- checkpoint `status` / `stage`
+- CLI stdout summary `unified_status` / `cli_stage`
+
+运行中阶段目前至少覆盖：
+- `initializing`
+- `locked`
+- `market`
+- `fundamental`
+
+`metrics_json` 当前会记录：
+- market/fundamental `rows_fetched`
+- market/fundamental `rows_written`
+- pending ticker 数
+- failed ticker 数
+
+### 结构化 run report
+
+在 run-state 之上，当前还会输出结构化 run report：
+- 默认路径：`tushare_manifest.run-report.json`
+- 同时可从 SQLite 的 `collection_runs` 反查基础状态
+
+当前 summary 至少包含：
+- `run_id`
+- `final_status`
+- `stage_timeline`
+- `tickers` / `ticker_count`
+- `modes`
+- `metrics`
+- `warnings` / `warning_count`
+- `validation` / `validation_acceptable`
+- `precheck`
+- `failed_market_tickers` / `failed_fundamental_tickers`
+- `failed_ticker_count`
+- `error`
+
+这让后续做 cron 跑批监控、历史 run 对比、异常追踪、简易 dashboard 都更顺。
+
+当前还具备 stale lock / stale run 自愈：会检测 lock 中 pid 是否仍存活；若确认 lock 已陈旧，则自动将关联的 running run-state 标记为 interrupted，并回收 lock 后继续当前 run。
+
+## Manifest
 
 路径默认：`data/raw/tushare_manifest.json`
 

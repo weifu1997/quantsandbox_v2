@@ -31,6 +31,10 @@ def test_max_drawdown() -> None:
     assert abs(max_drawdown([1.0, 1.2, 0.9, 1.1]) - 0.25) < 1e-9
 
 
+def test_max_drawdown_stays_non_negative_with_underwater_curve() -> None:
+    assert abs(max_drawdown([1.0, 0.8, 0.9, 0.7]) - 0.3) < 1e-9
+
+
 def test_win_rate() -> None:
     assert win_rate([0.1, -0.2, 0.3, 0.0]) == 0.5
 

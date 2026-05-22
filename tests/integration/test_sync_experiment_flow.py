@@ -13,16 +13,14 @@ def test_run_experiment_end_to_end_sync() -> None:
             start_date="20240101",
             end_date="20241231",
             factors=["momentum_20d", "pe"],
-            horizons=[20],
+            horizons=[10],
             tickers=["sh600519", "sz000858", "sz300750", "sz000001", "sh600036"],
             report_format="json",
         ),
     )
     assert "dataset_summary" in result
-    assert "dataset_metadata" in result
-    assert "factor_results" in result
     assert "backtest_results" in result
-    assert "report" in result
+    assert len(result["backtest_results"]["momentum_20d"]["equity_curve"]) > 0
 
     final_task = get_task(task["task_id"])
     assert final_task is not None

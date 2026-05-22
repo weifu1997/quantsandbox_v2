@@ -1,0 +1,67 @@
+{
+  "enabled": true,
+  "strategy_id": "revgrowth_always_on_v1",
+  "default_round": 1,
+  "liquidity_filter": {
+    "enabled": true,
+    "field": "amount",
+    "tail_cut": 0.2,
+    "artifact_prefix": "filtered_universe_growth_amount_bottom",
+    "base_backup_name": "filtered_universe_growth_base_latest.json"
+  },
+  "turnover_constraint": {
+    "enabled": true,
+    "annual_one_way_limit": 4.0
+  },
+  "execution": {
+    "enabled": true,
+    "bar_delay": 1,
+    "fill_mode": "next_open_plus_tick",
+    "tick_size": 0.01,
+    "base_tick_slippage_ticks": 1.0,
+    "high_vol_extra_tick_slippage_ticks": 0.5,
+    "high_vol_quantile": 0.8,
+    "commission_bps": 2.0,
+    "minimum_roundtrip_ticks": 2.0
+  },
+  "allocator_governance": {
+    "allow_single_deployable": true,
+    "single_strategy_status": "limited",
+    "max_daily_drawdown_stop": 0.03
+  },
+  "retry_rounds": [
+    {
+      "round": 1,
+      "liquidity_tail_cut": 0.2,
+      "annual_one_way_limit": 4.0,
+      "high_vol_extra_tick_slippage_ticks": 0.5
+    },
+    {
+      "round": 2,
+      "liquidity_tail_cut": 0.3,
+      "annual_one_way_limit": 4.0,
+      "high_vol_extra_tick_slippage_ticks": 0.5
+    },
+    {
+      "round": 3,
+      "liquidity_tail_cut": 0.3,
+      "annual_one_way_limit": 3.0,
+      "high_vol_extra_tick_slippage_ticks": 1.0,
+      "top_n": 30
+    },
+    {
+      "round": 4,
+      "liquidity_tail_cut": 0.4,
+      "annual_one_way_limit": 3.0,
+      "high_vol_extra_tick_slippage_ticks": 1.0,
+      "top_n": 30
+    },
+    {
+      "round": 5,
+      "liquidity_tail_cut": 0.5,
+      "annual_one_way_limit": 3.0,
+      "high_vol_extra_tick_slippage_ticks": 1.0,
+      "top_n": 30
+    }
+  ]
+}

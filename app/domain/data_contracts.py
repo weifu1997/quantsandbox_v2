@@ -101,19 +101,26 @@ def add_sample_flags(
 
 def build_listing_reference_map(reference_path: str | Path | None) -> pd.DataFrame:
     if reference_path is None:
-        return pd.DataFrame(columns=["ticker", "list_date"])
+        return pd.DataFrame(columns=["ticker", "list_date", "name"])
     path = Path(reference_path)
     if not path.exists():
-        return pd.DataFrame(columns=["ticker", "list_date"])
+        return pd.DataFrame(columns=["ticker", "list_date", "name"])
     if path.suffix.lower() == ".csv":
         df = pd.read_csv(path)
     else:
         df = pd.read_parquet(path)
     if "ticker" not in df.columns or "list_date" not in df.columns:
-        return pd.DataFrame(columns=["ticker", "list_date"])
-    result = df[["ticker", "list_date"]].copy()
+        return pd.DataFrame(columns=["ticker", "list_date", "name"])
+    keep_cols = ["ticker", "list_date"]
+    if "name" in df.columns:
+        keep_cols.append("name")
+    result = df[keep_cols].copy()
     result["ticker"] = result["ticker"].astype(str).str.lower().str.strip()
     result["list_date"] = pd.to_datetime(result["list_date"], errors="coerce")
+    if "name" not in result.columns:
+        result["name"] = pd.NA
+    else:
+        result["name"] = result["name"].astype("string").str.strip()
     return result.dropna(subset=["ticker"]).drop_duplicates(subset=["ticker"], keep="last")
 
 

@@ -12,6 +12,23 @@ class ReportSummaryModel(BaseModel):
     warning_count: int = 0
 
 
+class DeployabilityItemModel(BaseModel):
+    deployable_aum_floor: str | None = None
+    first_light_aum: str | None = None
+    first_medium_aum: str | None = None
+    first_heavy_aum: str | None = None
+    first_extreme_aum: str | None = None
+    recommended_max_aum: str | None = None
+    deployment_blocked: bool | None = None
+    blocking_reasons: list[str] = Field(default_factory=list)
+
+
+class DeployabilitySummaryModel(BaseModel):
+    growth: DeployabilityItemModel | None = None
+    value_primary: DeployabilityItemModel | None = None
+    value_baseline_reference: DeployabilityItemModel | None = None
+
+
 class ReportResponseModel(BaseModel):
     report_id: str
     experiment_id: str
@@ -22,6 +39,7 @@ class ReportResponseModel(BaseModel):
     content_type: str
     content: str | None = None
     structured: dict | None = None
+    deployability: DeployabilitySummaryModel | dict | None = None
 
 
 class ApiEnvelope(BaseModel):

@@ -19,6 +19,11 @@ class ExperimentConfig:
     commission_bps: float = 10.0
     slippage_bps: float = 5.0
     report_format: str = "json"
+    annual_turnover_limit: float | None = None
+    initial_aum: float = 1.0
+    board_lot_enabled: bool = False
+    board_lot_size: int = 100
+    execution_assumptions: dict | None = None
 
 
 @dataclass(slots=True)

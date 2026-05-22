@@ -50,7 +50,7 @@ def test_topn_backtest_returns_metrics() -> None:
         start_date="2024-01-01",
         end_date="2024-06-30",
         factor_names=["momentum_20d"],
-        horizons=[20],
+        horizons=[10],
         experiment_id="exp_flow_dataset_3",
     )
     report = run_strategy_backtest(
@@ -62,7 +62,7 @@ def test_topn_backtest_returns_metrics() -> None:
         benchmark="equal_weight_universe",
         commission_bps=10.0,
         slippage_bps=5.0,
-        horizon=20,
+        horizon=10,
     )
     assert report.factor_name == "momentum_20d"
     assert "annual_return" in report.payload

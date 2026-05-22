@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.domain.backtest.engine import run_topn_backtest
+from app.domain.data_contracts import factor_column
 
 
 def run_strategy_backtest(
@@ -16,7 +17,7 @@ def run_strategy_backtest(
 ):
     return run_topn_backtest(
         dataset=dataset,
-        factor_col=f"factor:{factor_name}",
+        factor_col=factor_column(factor_name),
         top_n=top_n,
         rebalance_frequency=rebalance_frequency,
         weighting=weighting,

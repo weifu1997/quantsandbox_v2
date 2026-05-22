@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.domain.research.diagnostics import diagnose_factor
 from app.domain.research.group_analysis import compute_group_returns, compute_monotonicity_score
 from app.domain.research.ic_analysis import compute_ic_series, compute_rank_ic_series, summarize_ic
 from app.domain.research.sample_split import split_in_sample_out_sample
@@ -31,10 +32,15 @@ def run_factor_validation(
             rank_ic_series = compute_rank_ic_series(frame, factor_col, return_col)
             ic_summary = summarize_ic(ic_series, rank_ic_series)
             group_returns = compute_group_returns(frame, factor_col, return_col, groups)
+            group_summary = {
+                "group_returns": group_returns,
+                "monotonicity_score": compute_monotonicity_score(group_returns),
+            }
             return {
                 "ic": ic_summary,
                 "group_returns": group_returns,
-                "monotonicity_score": compute_monotonicity_score(group_returns),
+                "monotonicity_score": group_summary["monotonicity_score"],
+                "diagnostics": diagnose_factor(factor_col, ic_summary, group_summary),
             }
 
         result["full_sample"][str(horizon)] = _analyze(dataset)

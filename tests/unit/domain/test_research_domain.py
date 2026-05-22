@@ -1,4 +1,5 @@
 from app.domain.factors.registry import build_default_factor_registry
+from app.domain.factors.momentum import momentum_20d_skip5d
 from app.domain.research.sample_split import rolling_time_splits, split_in_sample_out_sample
 from app.domain.research.validation import run_factor_validation
 from app.services.dataset_service import build_research_dataset
@@ -50,4 +51,26 @@ def test_validation_structure() -> None:
 def test_factor_registry_contains_phase1_factors() -> None:
     registry = build_default_factor_registry()
     names = set(registry.list_names())
-    assert {"momentum_20d", "momentum_60d", "reversal_5d", "pe", "pb", "roe"}.issubset(names)
+    assert {"momentum_20d", "momentum_60d", "momentum_20d_skip5d", "reversal_5d", "pe", "pb", "roe"}.issubset(names)
+
+
+def test_momentum_20d_skip5d_computes_after_skip_window() -> None:
+    dataset, _, _ = build_research_dataset(
+        tickers=["sh600519", "sz000858", "sh600036"],
+        start_date="2024-01-01",
+        end_date="2024-05-31",
+        factor_names=["momentum_20d_skip5d"],
+        horizons=[20],
+        experiment_id="exp_skip5d_test",
+    )
+    col = "factor:momentum_20d_skip5d"
+    assert col in dataset.columns
+    assert dataset[col].notna().sum() > 0
+
+    sample = dataset[["date", "ticker", "close", col]].dropna().iloc[0]
+    ticker = sample["ticker"]
+    ticker_df = dataset.loc[dataset["ticker"] == ticker].reset_index(drop=True)
+    idx = ticker_df.index[ticker_df["date"] == sample["date"]][0]
+    expected = float(ticker_df.loc[idx - 5, "close"] / ticker_df.loc[idx - 20, "close"] - 1.0)
+    actual = float(sample[col])
+    assert abs(actual - expected) < 1e-12

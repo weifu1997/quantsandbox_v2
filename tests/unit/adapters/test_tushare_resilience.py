@@ -1,9 +1,11 @@
 import logging
+import time
 
 import pandas as pd
+import pytest
 
 from app.adapters.fundamental_data_adapter import TushareFundamentalDataAdapter
-from app.adapters.market_data_adapter import TushareMarketDataAdapter
+from app.adapters.market_data_adapter import TushareMarketDataAdapter, _classify_retry_reason as market_classify_retry_reason, _retry_backoff_seconds as market_retry_backoff_seconds
 from app.services.dataset_service import build_research_dataset
 from app.utils.rate_limit import TushareRateLimiter
 
@@ -136,3 +138,40 @@ def test_rate_limiter_by_phase() -> None:
     limiter.acquire('retry')
 
     assert slept == [0.5, 1.0, 2.0]
+
+
+def test_retry_reason_and_backoff_classification() -> None:
+    assert market_classify_retry_reason(TimeoutError('timeout after 20s')) == 'timeout'
+    assert market_classify_retry_reason(RuntimeError('429 too many requests')) == 'rate_limit'
+    assert market_classify_retry_reason(RuntimeError('empty dataset')) == 'empty'
+    assert market_classify_retry_reason(RuntimeError('boom')) == 'error'
+
+    assert market_retry_backoff_seconds('timeout', 1) == 1.5
+    assert market_retry_backoff_seconds('timeout', 2) == 3.0
+    assert market_retry_backoff_seconds('rate_limit', 1) == 3.0
+    assert market_retry_backoff_seconds('error', 2) == 2.4
+
+
+def test_market_retry_stats_and_structured_warning(monkeypatch) -> None:
+    adapter = TushareMarketDataAdapter.__new__(TushareMarketDataAdapter)
+    adapter.log = logging.getLogger('test')
+    adapter.warnings = []
+    adapter.retry_stats = {'attempts': 0, 'timeouts': 0, 'rate_limits': 0, 'empties': 0, 'errors': 0}
+
+    class DummyLimiter:
+        def acquire(self, phase: str) -> None:
+            return None
+
+    adapter.rate_limiter = DummyLimiter()
+
+    monkeypatch.setattr(time, 'sleep', lambda seconds: None)
+
+    def always_fail(**kwargs):
+        raise RuntimeError('429 too many requests')
+
+    with pytest.raises(RuntimeError):
+        adapter._call_with_retry(always_fail, label='tushare.daily(test)', retries=1)
+
+    assert adapter.retry_stats['attempts'] == 2
+    assert adapter.retry_stats['rate_limits'] == 2
+    assert any('retry_warning|' in w and 'reason=rate_limit' in w for w in adapter.warnings)

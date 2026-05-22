@@ -8,6 +8,14 @@ from app.services.report_service import get_report, resolve_report_content
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
 
+def extract_deployability(structured: dict | None) -> dict | None:
+    if not structured:
+        return None
+    if isinstance(structured.get("deployability"), dict):
+        return structured.get("deployability")
+    return None
+
+
 @router.get("/{report_id}", response_model=ReportResponseModel)
 def read_report(report_id: str):
     result = get_report(report_id)
@@ -17,10 +25,14 @@ def read_report(report_id: str):
     structured = None
     if result.get("report_format") == "json" and content:
         import json
-        structured = json.loads(content)
+        try:
+            structured = json.loads(content)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            structured = None
     return {
         **result,
         "content": content,
         "content_type": result.get("report_format"),
         "structured": structured,
+        "deployability": extract_deployability(structured),
     }

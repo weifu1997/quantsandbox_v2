@@ -27,3 +27,16 @@ data/raw/*.json
 
 # OS/editor
 .DS_Store
+
+# Frontend build artifacts and dependencies
+web/node_modules/
+web/dist/
+web/.vite/
+
+# Database files
+*.sqlite3
+hermes_sandbox.db
+
+# Test generated outputs
+test_generated_*/
+tests/scripts/__pycache__/

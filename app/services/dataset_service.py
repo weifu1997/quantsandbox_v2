@@ -27,8 +27,16 @@ from app.utils.ids import new_report_id
 
 def add_future_returns(df: pd.DataFrame, horizons: list[int]) -> pd.DataFrame:
     result = df.copy()
+    grouped = result.groupby("ticker")
+    next_open = grouped["open"].shift(-1)
+    result["next_open_price"] = pd.to_numeric(next_open, errors="coerce")
+    daily_ret = grouped["close"].pct_change()
+    result["rolling_vol_20d"] = daily_ret.groupby(result["ticker"]).transform(lambda s: s.rolling(20).std(ddof=0))
+    result["rolling_vol_20d_hist_q80"] = result.groupby("ticker")["rolling_vol_20d"].transform(lambda s: s.expanding().quantile(0.8))
     for horizon in horizons:
-        result[f"future_return_{horizon}d"] = result.groupby("ticker")["close"].shift(-horizon) / result["close"] - 1.0
+        future_close = grouped["close"].shift(-horizon)
+        result[f"future_return_{horizon}d"] = future_close / result["close"] - 1.0
+        result[f"delayed_future_return_{horizon}d"] = future_close / result["next_open_price"] - 1.0
     return result
 
 
