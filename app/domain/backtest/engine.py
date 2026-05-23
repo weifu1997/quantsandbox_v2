@@ -283,7 +283,6 @@ def run_topn_backtest(
     equity_curve: list[float] = []
     holdings_by_date: dict[str, list[str]] = {}
     position_details_by_date: dict[str, dict[str, dict[str, float | int | bool]]] = {}
-    per_name_gross_contribution_by_date: dict[str, dict[str, float]] = {}
     per_name_accounting_by_date: dict[str, dict[str, dict[str, float | int | bool]]] = {}
     cash_accounting_by_date: dict[str, dict[str, float]] = {}
     returns_by_date: dict[str, float] = {}
@@ -300,7 +299,7 @@ def run_topn_backtest(
     execution_bucket_counts: dict[str, int] = {"very_light": 0, "light": 0, "medium": 0, "heavy": 0, "extreme": 0}
     participation_rates: list[float] = []
     impact_bps_values: list[float] = []
-    execution_by_rebalance_date: dict[str, dict[str, float | int]] = {}
+    execution_by_rebalance_date: dict[str, dict[str, float | int | bool | None]] = {}
 
     for dt in rebalance_dates:
         cross_section = sample.loc[sample["date"] == dt].copy()
@@ -323,13 +322,71 @@ def run_topn_backtest(
             holdings, board_lot_meta = _apply_board_lot_constraints(holdings, cross_section, float(equity) * float(initial_aum), board_lot_size=board_lot_size)
             if not holdings:
                 continue
-        gross = 0.0
+        current_equity = float(equity)
+        current_equity_cny = current_equity * float(initial_aum)
+        all_tickers = set(previous_holdings.keys()) | set(holdings.keys())
+
+        if "close" not in cross_section.columns:
+            raise ValueError("backtest dataset missing required mark-to-market column: close")
+
+        def _entry_price_for_ticker(ticker: str) -> float:
+            if ticker not in cross_section.index:
+                return 0.0
+            maybe = None
+            if "next_open_price" in cross_section.columns:
+                maybe = cross_section.loc[ticker, "next_open_price"]
+                if hasattr(maybe, "iloc"):
+                    maybe = maybe.iloc[0]
+                if maybe is not None and pd.notna(maybe) and float(maybe) > 0:
+                    return float(maybe)
+            if "open" in cross_section.columns:
+                maybe = cross_section.loc[ticker, "open"]
+                if hasattr(maybe, "iloc"):
+                    maybe = maybe.iloc[0]
+                if maybe is not None and pd.notna(maybe) and float(maybe) > 0:
+                    return float(maybe)
+            return 0.0
+
+        def _mark_price_for_ticker(ticker: str) -> float:
+            if ticker not in cross_section.index:
+                return 0.0
+            maybe = cross_section.loc[ticker, "close"]
+            if hasattr(maybe, "iloc"):
+                maybe = maybe.iloc[0]
+            if maybe is not None and pd.notna(maybe) and float(maybe) > 0:
+                return float(maybe)
+            return 0.0
+
+        marked_end_notional_by_ticker: dict[str, float] = {}
+        gross_pnl_cny_by_ticker: dict[str, float] = {}
         per_name_gross: dict[str, float] = {}
-        for ticker, weight in holdings.items():
-            if ticker in cross_section.index:
-                contribution = float(weight) * float(cross_section.loc[ticker, return_col])
-                gross += contribution
-                per_name_gross[ticker] = contribution
+
+        for ticker in all_tickers:
+            target_notional = 0.0
+            if board_lot_enabled and ticker in board_lot_meta:
+                target_notional = float(board_lot_meta[ticker].get('actual_notional', 0.0) or 0.0)
+            elif ticker in holdings:
+                target_notional = float(holdings.get(ticker, 0.0)) * current_equity_cny
+
+            entry_price = _entry_price_for_ticker(ticker)
+            mark_price = _mark_price_for_ticker(ticker)
+            if target_notional > 1e-12 and (entry_price <= 0 or mark_price <= 0):
+                raise ValueError(f"backtest dataset missing valid execution/mark price for ticker {ticker} on {pd.Timestamp(dt).strftime('%Y-%m-%d')}")
+
+            if board_lot_enabled and ticker in board_lot_meta:
+                shares = int(board_lot_meta[ticker].get('shares', 0) or 0)
+                mark_end_notional = float(shares) * mark_price if shares > 0 and mark_price > 0 else 0.0
+                board_lot_meta[ticker]['mark_price'] = mark_price
+            else:
+                mark_end_notional = target_notional * (mark_price / entry_price) if target_notional > 0 and entry_price > 0 and mark_price > 0 else 0.0
+
+            gross_pnl_cny = mark_end_notional - target_notional
+            marked_end_notional_by_ticker[ticker] = mark_end_notional
+            gross_pnl_cny_by_ticker[ticker] = gross_pnl_cny
+            per_name_gross[ticker] = gross_pnl_cny / current_equity_cny if current_equity_cny > 0 else 0.0
+
+        gross_pnl_total_cny = float(sum(gross_pnl_cny_by_ticker.values()))
+        gross = gross_pnl_total_cny / current_equity_cny if current_equity_cny > 0 else 0.0
         turnover = turnover_from_holdings(previous_holdings, holdings)
         turnover_values.append(turnover)
         extra_slippage_bps, extra_slippage_per_name = _extra_execution_cost_bps(cross_section, holdings, previous_holdings, execution_cfg)
@@ -338,9 +395,6 @@ def run_topn_backtest(
         date_key = pd.Timestamp(dt).strftime("%Y-%m-%d")
         per_name_rates: list[float] = []
         per_name_bps: list[float] = list(extra_slippage_per_name)
-        current_equity = float(equity)
-        current_equity_cny = current_equity * float(initial_aum)
-        all_tickers = set(previous_holdings.keys()) | set(holdings.keys())
         for ticker in all_tickers:
             target_weight = float(holdings.get(ticker, 0.0))
             current_weight = float(previous_holdings.get(ticker, 0.0))
@@ -368,7 +422,6 @@ def run_topn_backtest(
             invested_start = float(sum(float(w) for w in holdings.values()) * current_equity_cny)
         cash_start = previous_cash_end_cny
         cost_cny = float(cost) * current_equity_cny
-        gross_pnl_total_cny = float(gross) * current_equity_cny
         net_pnl_total_cny = gross_pnl_total_cny - cost_cny
 
         accounting_for_date: dict[str, dict[str, float | int | bool]] = {}
@@ -381,8 +434,7 @@ def run_topn_backtest(
                 target_notional = float(board_lot_meta[ticker].get('actual_notional', 0.0) or 0.0)
             elif ticker in holdings:
                 target_notional = float(holdings.get(ticker, 0.0)) * current_equity_cny
-            contribution = float(per_name_gross.get(ticker, 0.0))
-            gross_pnl_cny = contribution * current_equity_cny
+            gross_pnl_cny = float(gross_pnl_cny_by_ticker.get(ticker, 0.0))
             trade_abs = abs(target_notional - start_notional)
             trade_net_notional = target_notional - start_notional
             total_abs_trade += trade_abs
@@ -399,7 +451,7 @@ def run_topn_backtest(
             trade_abs = float(item['trade_abs_notional'])
             allocated_cost_cny = cost_cny * (trade_abs / total_abs_trade) if total_abs_trade > 1e-12 else 0.0
             post_trade_notional = float(item['start_notional']) + float(item['trade_net_notional'])
-            end_notional = post_trade_notional + float(item['gross_pnl_cny'])
+            end_notional = float(marked_end_notional_by_ticker.get(ticker, post_trade_notional + float(item['gross_pnl_cny'])))
             item['allocated_cost_cny'] = allocated_cost_cny
             item['post_trade_notional'] = post_trade_notional
             item['net_pnl_cny'] = float(item['gross_pnl_cny']) - allocated_cost_cny
@@ -423,7 +475,6 @@ def run_topn_backtest(
         holdings_by_date[date_key] = list(holdings.keys())
         if board_lot_enabled:
             position_details_by_date[date_key] = board_lot_meta
-        per_name_gross_contribution_by_date[date_key] = per_name_gross
         per_name_accounting_by_date[date_key] = accounting_for_date
         returns_by_date[date_key] = float(net)
         turnover_by_date[date_key] = float(turnover)
@@ -454,6 +505,9 @@ def run_topn_backtest(
         "rebalance_frequency": rebalance_frequency,
         "weighting": weighting,
         "benchmark_name": bm["name"],
+        "accounting_method": "mark_to_market_close",
+        "mark_price_field": "close",
+        "research_label_return_column": return_col,
         "annual_return": annual_return(returns, ppy),
         "total_return": total_return(equity_curve),
         "max_drawdown": max_drawdown(equity_curve),
@@ -467,7 +521,6 @@ def run_topn_backtest(
         "total_cost_paid_with_impact": float(cost_paid),
         "holdings_by_rebalance_date": holdings_by_date,
         "position_details_by_rebalance_date": position_details_by_date,
-        "per_name_gross_contribution_by_rebalance_date": per_name_gross_contribution_by_date,
         "per_name_accounting_by_rebalance_date": per_name_accounting_by_date,
         "cash_accounting_by_rebalance_date": cash_accounting_by_date,
         "returns_by_rebalance_date": returns_by_date,

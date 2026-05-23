@@ -6,14 +6,14 @@ export interface StockSummaryRow {
   sell_shares_total: number
   buy_notional_total: number
   sell_notional_total: number
-  estimated_realized_pnl_total: number
-  latest_estimated_shares_held: number
-  latest_estimated_avg_cost: number
+  realized_pnl_total: number
+  latest_shares_held: number
+  latest_avg_cost: number
   latest_reference_price: number
-  latest_position_notional_est: number
+  latest_position_notional: number
   latest_snapshot_date: string
-  estimated_unrealized_pnl: number
-  estimated_total_pnl: number
+  unrealized_pnl: number
+  total_pnl: number
 }
 
 export interface StockSummaryReport {

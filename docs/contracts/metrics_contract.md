@@ -29,7 +29,7 @@
 
 - turnover limit
 - board-lot 约束
-- delayed execution return
+- delayed execution return（仅研究标签，不再直接充当真实收益）
 - volatility-aware execution slippage
 - dynamic impact cost
 - per-name accounting
@@ -37,6 +37,8 @@
 - execution diagnostics
 
 因此文档中的成本与收益口径必须同时覆盖这些实现事实。
+
+> 2026-05-23 口径修正：growth 正式回测结果已切换为 **真实逐股逐期盯市（mark-to-market by close）**。`future_return_* / delayed_future_return_*` 仍保留在数据集里作为研究标签、排序/覆盖率校验字段，但**不再代表真实账本收益**，也不应再被解释为可审计交易收益。
 
 ---
 
@@ -335,19 +337,27 @@
 
 ## 14. delayed execution / return 列口径
 
-当前回测引擎会根据 execution config 决定使用哪一类 return 列：
+`future_return_*` / `delayed_future_return_*` 现在仅作为**研究标签**存在，用于：
 
-- 若 execution config enabled 且 dataset 中存在 `delayed_future_return_{horizon}d`
-  - 优先使用 delayed return 列
-- 否则使用：
-  - `future_return_{horizon}d`
+- 因子研究
+- 候选排序评估
+- execution-aware 研究分析
+
+它们**不再直接充当真实交易账本收益口径**。
+
+当前真实回测收益口径为：
+
+- 调仓日先按 `next_open_price`（fallback `open`）确定目标成交股数与目标持仓名义金额
+- 当期以 `close` 对真实持仓做逐股逐期盯市
+- `end_notional = shares * close`
+- `gross_pnl_cny = end_notional - post_trade_notional`
+- `net_pnl_cny = gross_pnl_cny - allocated_cost_cny`
 
 这意味着：
 
-- strategy return 口径会因为 execution config 而改变
-- benchmark 也会共享相同 `return_col`
-
-因此 strategy 与 benchmark 的比较仍然在同一 return 语义下进行。
+- strategy return 不再直接等于 `future_return_*` / `delayed_future_return_*` 的横截面加权平均
+- benchmark 也应使用相同的真实价格盯市语义，而不是共享标签收益列
+- 旧的“标签收益驱动的组合模拟”已降级为研究层能力，不应再解释为真实收益
 
 ---
 
@@ -390,11 +400,7 @@
 
 当前引擎不仅输出聚合收益，还输出逐股和现金核算：
 
-### 16.1 逐股毛贡献
-
-- `per_name_gross_contribution_by_rebalance_date`
-
-### 16.2 逐股会计核算
+### 16.1 逐股会计核算
 
 - `per_name_accounting_by_rebalance_date`
 
@@ -410,7 +416,7 @@
 - `net_pnl_cny`
 - `end_notional`
 
-### 16.3 现金核算
+### 16.2 现金核算
 
 - `cash_accounting_by_rebalance_date`
 
@@ -492,7 +498,6 @@
 ### 18.3 执行与持仓细节
 
 - `position_details_by_rebalance_date`
-- `per_name_gross_contribution_by_rebalance_date`
 - `per_name_accounting_by_rebalance_date`
 - `cash_accounting_by_rebalance_date`
 - `execution_by_rebalance_date`

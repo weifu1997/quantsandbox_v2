@@ -17,7 +17,7 @@
           <span class="config-badge">🏦 AUM <span class="badge-detail">¥100,000</span></span>
         </span>
       </div>
-      <p class="section-desc">提交后将使用 production 批准的正式配置运行回测，完整参数将在结果中展示。</p>
+      <p class="section-desc">提交后将使用 production 批准的正式配置运行回测；结果区展示的收益已切换为真实逐股逐期盯市口径，非旧的标签收益模拟口径。</p>
     </div>
 
     <!-- 回测窗口 + 提交 -->
@@ -116,21 +116,24 @@
     <div v-if="hasResult" class="panel-section">
       <div class="ledger-header">
         <span class="ledger-title">revenue_growth</span>
-        <span class="ledger-subtitle">Backtest Ledger</span>
+        <span class="ledger-subtitle">回测账本 · 真实逐股逐期盯市（按 close 盯市）</span>
+      </div>
+      <div class="result-method-note">
+        当前结果口径：真实逐股逐期盯市。研究数据中的 future_return / delayed_future_return 仅用于研究标签与样本筛选，不再直接代表真实收益。
       </div>
 
       <!-- 核心三列 -->
       <div class="summary-cards">
         <div class="summary-card">
-          <div class="summary-label">Starting Capital</div>
+          <div class="summary-label">起始本金</div>
           <div class="summary-value">¥100,000</div>
         </div>
         <div class="summary-card">
-          <div class="summary-label">Final Equity</div>
+          <div class="summary-label">期末权益</div>
           <div class="summary-value">¥{{ equityFinal }}</div>
         </div>
         <div class="summary-card highlight">
-          <div class="summary-label">Total Return</div>
+          <div class="summary-label">总收益率</div>
           <div class="summary-value" :class="totalReturnPct >= 0 ? 'green' : 'red'">{{ totalReturnStr }}</div>
         </div>
       </div>

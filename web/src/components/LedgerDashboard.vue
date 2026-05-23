@@ -3,7 +3,7 @@
     <div class="section-head">
       <div>
         <h2>调仓账本 / Ledger</h2>
-        <p class="muted">直接读取后端 reports 接口，展示调仓、逐笔交易、已平仓盈亏、按股票汇总，方便你人工核算收益。</p>
+        <p class="muted">直接读取后端 reports 接口，展示真实逐股逐期盯市口径下的调仓、逐笔交易、已平仓盈亏、按股票汇总，方便你人工核算收益。</p>
       </div>
       <div class="ledger-controls">
         <label>

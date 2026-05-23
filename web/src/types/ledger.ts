@@ -62,7 +62,7 @@ export interface StockTradeRow {
   prev_weight: number
   new_weight: number
   delta_weight: number
-  estimated_realized_pnl: number | ''
+  realized_pnl: number | ''
 }
 
 export interface PositionSnapshotRow {
@@ -70,10 +70,10 @@ export interface PositionSnapshotRow {
   ticker: string
   name?: string
   weight: number
-  position_notional_est: number
+  position_notional: number
   reference_price: number
-  estimated_shares_held: number
-  estimated_avg_cost: number
+  shares_held: number
+  avg_cost: number
 }
 
 export interface ClosedTradeRow {
@@ -83,7 +83,7 @@ export interface ClosedTradeRow {
   sell_price: number
   sell_shares: number
   avg_cost: number
-  estimated_realized_pnl: number
+  realized_pnl: number
 }
 
 export interface StockLedgerReport {

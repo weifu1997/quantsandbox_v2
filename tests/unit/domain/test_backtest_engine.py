@@ -64,12 +64,12 @@ def test_estimate_dynamic_impact_bps_bucket_boundaries() -> None:
 
 def test_run_topn_backtest_basic_flow() -> None:
     dataset = pd.DataFrame([
-        {"date": "2024-01-02", "ticker": "a", "factor:score": 3.0, "future_return_5d": 0.10, "is_valid_sample": True, "amount": 50.0, "next_open_price": 1.0, "open": 1.0},
-        {"date": "2024-01-02", "ticker": "b", "factor:score": 2.0, "future_return_5d": 0.05, "is_valid_sample": True, "amount": 50.0, "next_open_price": 1.0, "open": 1.0},
-        {"date": "2024-01-02", "ticker": "c", "factor:score": 1.0, "future_return_5d": -0.02, "is_valid_sample": True, "amount": 50.0, "next_open_price": 1.0, "open": 1.0},
-        {"date": "2024-01-03", "ticker": "a", "factor:score": 1.0, "future_return_5d": 0.01, "is_valid_sample": True, "amount": 50.0, "next_open_price": 1.0, "open": 1.0},
-        {"date": "2024-01-03", "ticker": "b", "factor:score": 4.0, "future_return_5d": 0.03, "is_valid_sample": True, "amount": 50.0, "next_open_price": 1.0, "open": 1.0},
-        {"date": "2024-01-03", "ticker": "c", "factor:score": 2.0, "future_return_5d": 0.02, "is_valid_sample": True, "amount": 50.0, "next_open_price": 1.0, "open": 1.0},
+        {"date": "2024-01-02", "ticker": "a", "factor:score": 3.0, "future_return_5d": 0.10, "is_valid_sample": True, "amount": 50.0, "next_open_price": 1.0, "open": 1.0, "close": 1.10},
+        {"date": "2024-01-02", "ticker": "b", "factor:score": 2.0, "future_return_5d": 0.05, "is_valid_sample": True, "amount": 50.0, "next_open_price": 1.0, "open": 1.0, "close": 1.05},
+        {"date": "2024-01-02", "ticker": "c", "factor:score": 1.0, "future_return_5d": -0.02, "is_valid_sample": True, "amount": 50.0, "next_open_price": 1.0, "open": 1.0, "close": 0.98},
+        {"date": "2024-01-03", "ticker": "a", "factor:score": 1.0, "future_return_5d": 0.01, "is_valid_sample": True, "amount": 50.0, "next_open_price": 1.0, "open": 1.0, "close": 1.01},
+        {"date": "2024-01-03", "ticker": "b", "factor:score": 4.0, "future_return_5d": 0.03, "is_valid_sample": True, "amount": 50.0, "next_open_price": 1.0, "open": 1.0, "close": 1.03},
+        {"date": "2024-01-03", "ticker": "c", "factor:score": 2.0, "future_return_5d": 0.02, "is_valid_sample": True, "amount": 50.0, "next_open_price": 1.0, "open": 1.0, "close": 1.02},
     ])
     result = run_topn_backtest(
         dataset=dataset,
@@ -84,6 +84,7 @@ def test_run_topn_backtest_basic_flow() -> None:
     )
     payload = result.payload
     assert payload["factor_name"] == "score"
+    assert payload["accounting_method"] == "mark_to_market_close"
     assert len(payload["equity_curve"]) == 2
     assert payload["holdings_by_rebalance_date"]["2024-01-02"] == ["a", "b"]
     assert payload["holdings_by_rebalance_date"]["2024-01-03"] == ["b", "c"]
@@ -155,10 +156,10 @@ def test_apply_board_lot_constraints_rounds_to_100_share_lots_and_skips_infeasib
 
 def test_run_topn_backtest_with_board_lot_enabled_keeps_equity_curve() -> None:
     dataset = pd.DataFrame([
-        {"date": "2024-01-02", "ticker": "a", "factor:score": 3.0, "future_return_5d": 0.10, "is_valid_sample": True, "amount": 50.0, "next_open_price": 10.0, "open": 10.0},
-        {"date": "2024-01-02", "ticker": "b", "factor:score": 2.0, "future_return_5d": 0.05, "is_valid_sample": True, "amount": 50.0, "next_open_price": 55.0, "open": 55.0},
-        {"date": "2024-01-03", "ticker": "a", "factor:score": 1.0, "future_return_5d": 0.01, "is_valid_sample": True, "amount": 50.0, "next_open_price": 10.0, "open": 10.0},
-        {"date": "2024-01-03", "ticker": "b", "factor:score": 4.0, "future_return_5d": 0.03, "is_valid_sample": True, "amount": 50.0, "next_open_price": 55.0, "open": 55.0},
+        {"date": "2024-01-02", "ticker": "a", "factor:score": 3.0, "future_return_5d": 0.10, "is_valid_sample": True, "amount": 50.0, "next_open_price": 10.0, "open": 10.0, "close": 11.0},
+        {"date": "2024-01-02", "ticker": "b", "factor:score": 2.0, "future_return_5d": 0.05, "is_valid_sample": True, "amount": 50.0, "next_open_price": 55.0, "open": 55.0, "close": 57.75},
+        {"date": "2024-01-03", "ticker": "a", "factor:score": 1.0, "future_return_5d": 0.01, "is_valid_sample": True, "amount": 50.0, "next_open_price": 10.0, "open": 10.0, "close": 10.1},
+        {"date": "2024-01-03", "ticker": "b", "factor:score": 4.0, "future_return_5d": 0.03, "is_valid_sample": True, "amount": 50.0, "next_open_price": 55.0, "open": 55.0, "close": 56.65},
     ])
     dataset.attrs['initial_aum'] = 100_000.0
     dataset.attrs['board_lot_enabled'] = True
@@ -187,8 +188,8 @@ def test_run_topn_backtest_with_board_lot_enabled_keeps_equity_curve() -> None:
 
 def test_run_topn_backtest_board_lot_cash_drag_is_implicit_in_weights() -> None:
     dataset = pd.DataFrame([
-        {"date": "2024-01-02", "ticker": "a", "factor:score": 3.0, "future_return_5d": 0.10, "is_valid_sample": True, "amount": 50.0, "next_open_price": 10.0, "open": 10.0},
-        {"date": "2024-01-02", "ticker": "b", "factor:score": 2.0, "future_return_5d": 0.05, "is_valid_sample": True, "amount": 50.0, "next_open_price": 600.0, "open": 600.0},
+        {"date": "2024-01-02", "ticker": "a", "factor:score": 3.0, "future_return_5d": 0.10, "is_valid_sample": True, "amount": 50.0, "next_open_price": 10.0, "open": 10.0, "close": 11.0},
+        {"date": "2024-01-02", "ticker": "b", "factor:score": 2.0, "future_return_5d": 0.05, "is_valid_sample": True, "amount": 50.0, "next_open_price": 600.0, "open": 600.0, "close": 630.0},
     ])
     dataset.attrs['initial_aum'] = 100_000.0
     dataset.attrs['board_lot_enabled'] = True
@@ -206,13 +207,14 @@ def test_run_topn_backtest_board_lot_cash_drag_is_implicit_in_weights() -> None:
         horizon=5,
     )
     payload = result.payload
+    # 高价股 b 因一手约束无法成交；a 实际成交 500 股，entry=10, close=11，因此组合毛收益应为 5%
     assert abs(payload['gross_return_by_rebalance_date']['2024-01-02'] - 0.05) < 1e-9
 
 
-def test_run_topn_backtest_outputs_per_name_gross_contribution_details() -> None:
+def test_run_topn_backtest_outputs_real_mark_to_market_accounting_details() -> None:
     dataset = pd.DataFrame([
-        {"date": "2024-01-02", "ticker": "a", "factor:score": 3.0, "future_return_5d": 0.10, "is_valid_sample": True, "amount": 50.0, "next_open_price": 10.0, "open": 10.0},
-        {"date": "2024-01-02", "ticker": "b", "factor:score": 2.0, "future_return_5d": 0.05, "is_valid_sample": True, "amount": 50.0, "next_open_price": 600.0, "open": 600.0},
+        {"date": "2024-01-02", "ticker": "a", "factor:score": 3.0, "future_return_5d": 0.10, "is_valid_sample": True, "amount": 50.0, "next_open_price": 10.0, "open": 10.0, "close": 11.0},
+        {"date": "2024-01-02", "ticker": "b", "factor:score": 2.0, "future_return_5d": 0.05, "is_valid_sample": True, "amount": 50.0, "next_open_price": 600.0, "open": 600.0, "close": 600.0},
     ])
     dataset.attrs['initial_aum'] = 100_000.0
     dataset.attrs['board_lot_enabled'] = True
@@ -230,14 +232,12 @@ def test_run_topn_backtest_outputs_per_name_gross_contribution_details() -> None
         horizon=5,
     )
     payload = result.payload
-    assert 'per_name_gross_contribution_by_rebalance_date' in payload
-    contrib = payload['per_name_gross_contribution_by_rebalance_date']['2024-01-02']
-    assert abs(sum(contrib.values()) - payload['gross_return_by_rebalance_date']['2024-01-02']) < 1e-12
-    assert abs(contrib['a'] - 0.05) < 1e-9
-    assert abs(contrib.get('b', 0.0) - 0.0) < 1e-12
+    assert 'per_name_gross_contribution_by_rebalance_date' not in payload
 
     accounting = payload['per_name_accounting_by_rebalance_date']['2024-01-02']
     cash = payload['cash_accounting_by_rebalance_date']['2024-01-02']
+    details = payload['position_details_by_rebalance_date']['2024-01-02']
+    assert abs(float(accounting['a']['end_notional']) - int(details['a']['shares']) * 11.0) < 1e-6
     end_total = sum(float(x['end_notional']) for x in accounting.values()) + float(cash['cash_end'])
     expected_end = 100_000.0 * payload['equity_curve'][0]
     assert abs(end_total - expected_end) < 1e-6
@@ -245,10 +245,10 @@ def test_run_topn_backtest_outputs_per_name_gross_contribution_details() -> None
 
 def test_run_topn_backtest_outputs_per_name_accounting_closed_book() -> None:
     dataset = pd.DataFrame([
-        {"date": "2024-01-02", "ticker": "a", "factor:score": 3.0, "future_return_5d": 0.10, "is_valid_sample": True, "amount": 50.0, "next_open_price": 10.0, "open": 10.0},
-        {"date": "2024-01-02", "ticker": "b", "factor:score": 2.0, "future_return_5d": 0.05, "is_valid_sample": True, "amount": 50.0, "next_open_price": 600.0, "open": 600.0},
-        {"date": "2024-01-03", "ticker": "a", "factor:score": 1.0, "future_return_5d": 0.01, "is_valid_sample": True, "amount": 50.0, "next_open_price": 10.0, "open": 10.0},
-        {"date": "2024-01-03", "ticker": "b", "factor:score": 4.0, "future_return_5d": 0.03, "is_valid_sample": True, "amount": 50.0, "next_open_price": 600.0, "open": 600.0},
+        {"date": "2024-01-02", "ticker": "a", "factor:score": 3.0, "future_return_5d": 0.10, "is_valid_sample": True, "amount": 50.0, "next_open_price": 10.0, "open": 10.0, "close": 11.0},
+        {"date": "2024-01-02", "ticker": "b", "factor:score": 2.0, "future_return_5d": 0.05, "is_valid_sample": True, "amount": 50.0, "next_open_price": 600.0, "open": 600.0, "close": 630.0},
+        {"date": "2024-01-03", "ticker": "a", "factor:score": 1.0, "future_return_5d": 0.01, "is_valid_sample": True, "amount": 50.0, "next_open_price": 10.0, "open": 10.0, "close": 10.1},
+        {"date": "2024-01-03", "ticker": "b", "factor:score": 4.0, "future_return_5d": 0.03, "is_valid_sample": True, "amount": 50.0, "next_open_price": 600.0, "open": 600.0, "close": 618.0},
     ])
     dataset.attrs['initial_aum'] = 100_000.0
     dataset.attrs['board_lot_enabled'] = True
@@ -276,10 +276,10 @@ def test_run_topn_backtest_outputs_per_name_accounting_closed_book() -> None:
 
 def test_run_topn_backtest_per_name_accounting_carries_forward_previous_end_notional() -> None:
     dataset = pd.DataFrame([
-        {"date": "2024-01-02", "ticker": "a", "factor:score": 3.0, "future_return_5d": 0.10, "is_valid_sample": True, "amount": 50.0, "next_open_price": 10.0, "open": 10.0},
-        {"date": "2024-01-02", "ticker": "b", "factor:score": 2.0, "future_return_5d": 0.00, "is_valid_sample": True, "amount": 50.0, "next_open_price": 600.0, "open": 600.0},
-        {"date": "2024-01-03", "ticker": "a", "factor:score": 3.0, "future_return_5d": 0.20, "is_valid_sample": True, "amount": 50.0, "next_open_price": 10.0, "open": 10.0},
-        {"date": "2024-01-03", "ticker": "b", "factor:score": 2.0, "future_return_5d": 0.00, "is_valid_sample": True, "amount": 50.0, "next_open_price": 600.0, "open": 600.0},
+        {"date": "2024-01-02", "ticker": "a", "factor:score": 3.0, "future_return_5d": 0.10, "is_valid_sample": True, "amount": 50.0, "next_open_price": 10.0, "open": 10.0, "close": 11.0},
+        {"date": "2024-01-02", "ticker": "b", "factor:score": 2.0, "future_return_5d": 0.00, "is_valid_sample": True, "amount": 50.0, "next_open_price": 600.0, "open": 600.0, "close": 600.0},
+        {"date": "2024-01-03", "ticker": "a", "factor:score": 3.0, "future_return_5d": 0.20, "is_valid_sample": True, "amount": 50.0, "next_open_price": 10.0, "open": 10.0, "close": 12.0},
+        {"date": "2024-01-03", "ticker": "b", "factor:score": 2.0, "future_return_5d": 0.00, "is_valid_sample": True, "amount": 50.0, "next_open_price": 600.0, "open": 600.0, "close": 600.0},
     ])
     dataset.attrs['initial_aum'] = 100_000.0
     dataset.attrs['board_lot_enabled'] = True
@@ -301,3 +301,32 @@ def test_run_topn_backtest_per_name_accounting_carries_forward_previous_end_noti
     first_end = float(acct['2024-01-02']['a']['end_notional'])
     second_start = float(acct['2024-01-03']['a']['start_notional'])
     assert abs(second_start - first_end) < 1e-6
+
+
+def test_run_topn_backtest_marks_end_notional_to_real_close_price() -> None:
+    dataset = pd.DataFrame([
+        {"date": "2024-01-02", "ticker": "a", "factor:score": 3.0, "future_return_5d": 0.50, "is_valid_sample": True, "amount": 50.0, "next_open_price": 10.0, "open": 10.0, "close": 11.0},
+        {"date": "2024-01-02", "ticker": "b", "factor:score": 2.0, "future_return_5d": 0.00, "is_valid_sample": True, "amount": 50.0, "next_open_price": 600.0, "open": 600.0, "close": 600.0},
+    ])
+    dataset.attrs['initial_aum'] = 100_000.0
+    dataset.attrs['board_lot_enabled'] = True
+    dataset.attrs['board_lot_size'] = 100
+
+    result = run_topn_backtest(
+        dataset=dataset,
+        factor_col='factor:score',
+        top_n=2,
+        rebalance_frequency='D',
+        weighting='equal',
+        benchmark='equal_weight_universe',
+        commission_bps=0.0,
+        slippage_bps=0.0,
+        horizon=5,
+    )
+
+    payload = result.payload
+    details = payload['position_details_by_rebalance_date']['2024-01-02']
+    acct = payload['per_name_accounting_by_rebalance_date']['2024-01-02']
+    shares_a = int(details['a']['shares'])
+    expected_end_notional_a = shares_a * 11.0
+    assert abs(float(acct['a']['end_notional']) - expected_end_notional_a) < 1e-6

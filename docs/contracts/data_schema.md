@@ -275,11 +275,17 @@
 
 语义：
 
-- 以“下一期开盘成交、持有 horizon 天后卖出”的近似 delayed execution 收益口径
+- 以“下一期开盘成交、持有 horizon 天后卖出”的近似 delayed execution 研究标签
 
 用途：
 
-- 当 execution config enabled 且引擎发现该列存在时，回测引擎优先使用 delayed return 列
+- execution-aware 研究分析
+- 候选排序与研究评估
+
+注意：
+
+- 该列已**降级为研究标签**
+- 不应再直接充当真实逐股逐期盯市回测的收益口径
 
 ---
 
@@ -323,7 +329,7 @@
 1. merge 行情与财务
 2. 补 reference 字段（如 `listed_days`）
 3. 计算 factor 列
-4. 计算 future return / delayed future return / execution 辅助列
+4. 计算 future return / delayed future return / execution 辅助列（研究标签）
 5. 补 `is_valid_sample` / `missing_reason`
 
 则完整研究数据集应满足：
@@ -340,7 +346,7 @@
 说明：
 
 - `delayed_future_return_*` 与 execution 辅助列当前不是 `validate_research_dataset(...)` 的强制必填项
-- 但若启用 execution-aware backtest，它们会成为实际运行口径的一部分
+- 它们属于研究层标签/辅助列，不再直接决定真实逐股逐期盯市收益
 
 ---
 
@@ -351,9 +357,11 @@
 - `date`
 - `ticker`
 - 指定因子列，例如 `factor:momentum_20d`
-- 指定收益列，例如：
+- 指定研究标签列，例如：
   - `future_return_20d`
-  - 或在 delayed execution 场景下使用 `delayed_future_return_20d`
+  - `delayed_future_return_20d`
+
+注意：这些列用于研究标签，不等同于真实逐股逐期盯市回测收益。
 
 对应校验函数：
 

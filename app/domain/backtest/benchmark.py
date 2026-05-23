@@ -23,8 +23,23 @@ def run_equal_weight_universe_benchmark(
     sample["date"] = pd.to_datetime(sample["date"])
     if "is_valid_sample" in sample.columns:
         sample = sample.loc[sample["is_valid_sample"] == True].copy()
-    sample[return_col] = pd.to_numeric(sample[return_col], errors="coerce")
-    sample = sample.dropna(subset=[return_col])
+
+    if "close" not in sample.columns:
+        raise ValueError("benchmark requires close column for real mark-to-market pricing")
+
+    entry_col = None
+    if "next_open_price" in sample.columns:
+        entry_col = "next_open_price"
+    elif "open" in sample.columns:
+        entry_col = "open"
+    else:
+        raise ValueError("benchmark requires next_open_price or open column for entry pricing")
+
+    sample[entry_col] = pd.to_numeric(sample[entry_col], errors="coerce")
+    sample["close"] = pd.to_numeric(sample["close"], errors="coerce")
+    sample = sample.dropna(subset=[entry_col, "close"])
+    sample = sample.loc[(sample[entry_col] > 0) & (sample["close"] > 0)].copy()
+    sample["realized_mark_return"] = sample["close"] / sample[entry_col] - 1.0
 
     rebalance_dates = set(select_rebalance_dates(sample["date"].tolist(), rebalance_frequency))
     rows: list[tuple[str, float]] = []
@@ -32,7 +47,7 @@ def run_equal_weight_universe_benchmark(
         dt = pd.Timestamp(raw_date)
         if dt not in rebalance_dates:
             continue
-        rows.append((dt.strftime("%Y-%m-%d"), float(group[return_col].mean())))
+        rows.append((dt.strftime("%Y-%m-%d"), float(group["realized_mark_return"].mean())))
     dates = [x[0] for x in rows]
     returns = [x[1] for x in rows]
     return {

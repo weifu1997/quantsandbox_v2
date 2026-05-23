@@ -173,6 +173,7 @@
 - 当前是 **accepted 后异步执行**
 - 不会同步返回完整研究结果
 - `task` 初始状态很快会进入 `running`
+- 回测完成后的 `report` / `backtest_results` 已切换为 **真实逐股逐期盯市口径**；`future_return_* / delayed_future_return_*` 仅用于研究标签，不再应被前端或文档解释为真实收益来源
 
 ---
 
