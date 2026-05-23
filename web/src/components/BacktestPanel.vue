@@ -41,6 +41,49 @@
       </div>
     </div>
 
+    <!-- 回测记录 -->
+    <div class="panel-section">
+      <div class="section-header">
+        <h3 class="section-title">回测记录</h3>
+        <span class="section-desc">后端返回的最近回测/实验记录，点击可恢复查看结果。</span>
+      </div>
+      <div v-if="historyError" class="empty-text">{{ historyError }}</div>
+      <div v-else-if="historyItems.length === 0" class="empty-text">暂无回测记录</div>
+      <div v-else class="history-list history-scroll-window">
+        <div
+          v-for="item in historyItems"
+          :key="item.experiment_id"
+          class="history-item"
+        >
+          <button
+            class="history-item-main"
+            @click="loadHistoryItem(item)"
+          >
+            <div class="history-item-head">
+              <span class="history-date">{{ item.start_date }} ~ {{ item.end_date }}</span>
+              <span class="history-status" :class="statusClass(item.status)">{{ item.status }}</span>
+            </div>
+            <div class="history-meta">
+              <span>因子：{{ (item.factors || []).join(', ') || '-' }}</span>
+              <span>权重：{{ item.weighting || '-' }}</span>
+              <span>TopN：{{ item.top_n ?? '-' }}</span>
+            </div>
+            <div class="history-meta subtle">
+              <span>experiment_id: {{ item.experiment_id }}</span>
+              <span>report_id: {{ item.report_id || '-' }}</span>
+            </div>
+          </button>
+          <button
+            class="history-delete-btn"
+            :disabled="deletingExperimentIds[item.experiment_id]"
+            @click="deleteHistoryItem(item)"
+          >
+            {{ deletingExperimentIds[item.experiment_id] ? '删除中...' : '删除' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- 回测结果 -->
     <div v-if="hasResult" class="panel-section">
       <div class="ledger-header">
@@ -218,6 +261,9 @@ const showTickerModal = ref(false)
 const showWeightModal = ref(false)
 
 const stockNameMap = ref({})
+const historyItems = ref([])
+const historyError = ref('')
+const deletingExperimentIds = ref({})
 
 // Core data from report
 const totalReturn = ref(0)
@@ -315,6 +361,13 @@ function toggleWeighting() {
   showWeightModal.value = !showWeightModal.value
 }
 
+function statusClass(status) {
+  const s = String(status || '').toLowerCase()
+  if (s === 'completed' || s === 'success') return 'green'
+  if (s === 'failed' || s === 'error' || s === 'interrupted') return 'red'
+  return ''
+}
+
 async function fetchTickers() {
   if (tickerList.value.length > 0) {
     showTickerModal.value = true
@@ -331,7 +384,7 @@ async function fetchTickers() {
   try {
     const resp = await fetch(API_BASE + '/api/experiments/tickers')
     const json = await resp.json()
-    const list = json.data || json.tickers || []
+    const list = json?.data?.tickers || json?.tickers || []
     tickerList.value = list
     tickerCount.value = list.length
     showTickerModal.value = true
@@ -418,8 +471,8 @@ function startPolling() {
         return
       }
       const td = json.data || json
-      const status = td.status || td.task_status
-      if (status === 'COMPLETED' || status === 'SUCCESS') {
+      const status = String(td.status || td.task_status || '').toLowerCase()
+      if (status === 'completed' || status === 'success') {
         clearInterval(interval)
         progressPercent.value = 100
         progressStatus.value = '回测完成！'
@@ -429,7 +482,8 @@ function startPolling() {
         if (reportId.value) {
           await fetchResult(reportId.value)
         }
-      } else if (status === 'FAILED' || status === 'ERROR') {
+        await fetchHistory()
+      } else if (status === 'failed' || status === 'error' || status === 'interrupted') {
         clearInterval(interval)
         progressStatus.value = '回测失败: ' + (td.result?.error || td.error || '未知错误')
         submitting.value = false
@@ -510,7 +564,90 @@ async function fetchResult(rid) {
   }
 }
 
+async function fetchHistory() {
+  historyError.value = ''
+  try {
+    const resp = await fetch(API_BASE + '/api/experiments/history?limit=20')
+    const json = await resp.json()
+    if (!resp.ok) {
+      historyError.value = json?.detail || '回测记录加载失败'
+      return
+    }
+    historyItems.value = json?.data?.items || []
+  } catch (e) {
+    historyError.value = '回测记录加载失败'
+  }
+}
+
+async function loadHistoryItem(item) {
+  backtestConfig.startDate = item.start_date || backtestConfig.startDate
+  backtestConfig.endDate = item.end_date || backtestConfig.endDate
+  experimentId.value = item.experiment_id || null
+  taskId.value = item.task_id || null
+  reportId.value = item.report_id || item.result_ref || null
+  if (reportId.value) {
+    await fetchResult(reportId.value)
+  }
+}
+
+async function deleteHistoryItem(item) {
+  const experimentIdToDelete = item?.experiment_id
+  if (!experimentIdToDelete) return
+
+  const confirmed = window.confirm(`确认删除这条回测记录吗？\n\nexperiment_id: ${experimentIdToDelete}\n\n这会同时删除后端数据库中的 experiment/task/report 记录及相关生成文件。`)
+  if (!confirmed) return
+
+  deletingExperimentIds.value = {
+    ...deletingExperimentIds.value,
+    [experimentIdToDelete]: true,
+  }
+
+  try {
+    const resp = await fetch(API_BASE + `/api/experiments/${experimentIdToDelete}`, {
+      method: 'DELETE',
+    })
+    const json = await resp.json()
+    if (!resp.ok) {
+      window.alert(json?.detail || '删除失败')
+      return
+    }
+
+    historyItems.value = historyItems.value.filter((historyItem) => historyItem.experiment_id !== experimentIdToDelete)
+
+    if (experimentId.value === experimentIdToDelete) {
+      experimentId.value = null
+      taskId.value = null
+      reportId.value = null
+      hasResult.value = false
+      progressPercent.value = 0
+      progressStatus.value = ''
+    }
+
+    await fetchHistory()
+  } catch (e) {
+    window.alert('删除失败')
+  } finally {
+    deletingExperimentIds.value = {
+      ...deletingExperimentIds.value,
+      [experimentIdToDelete]: false,
+    }
+  }
+}
 onMounted(async () => {
+  await fetchHistory()
+
+  const latestHistoryItem = historyItems.value?.[0]
+  const latestStatus = String(latestHistoryItem?.status || '').toLowerCase()
+  if (latestHistoryItem?.task_id && ['pending', 'queued', 'running'].includes(latestStatus)) {
+    experimentId.value = latestHistoryItem.experiment_id || null
+    taskId.value = latestHistoryItem.task_id || null
+    reportId.value = latestHistoryItem.report_id || latestHistoryItem.result_ref || null
+    submitting.value = true
+    progressPercent.value = 30
+    progressStatus.value = '执行中...'
+    startPolling()
+  }
+
   // Try to restore latest report on page load
   try {
     const resp = await fetch(API_BASE + '/api/experiments/latest/report')
@@ -610,6 +747,96 @@ onMounted(async () => {
   font-size: 10px;
   color: #888;
 }
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.history-scroll-window {
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.history-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px;
+  gap: 12px;
+  align-items: stretch;
+  width: 100%;
+}
+
+.history-item-main {
+  min-width: 0;
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid #2a2a4a;
+  background: #0f0f23;
+  color: #e0e0f0;
+  cursor: pointer;
+}
+
+.history-item-main:hover {
+  background: #16213e;
+}
+
+.history-delete-btn {
+  width: 72px;
+  min-width: 72px;
+  border: 1px solid #7f1d1d;
+  background: #2b1114;
+  color: #fca5a5;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.history-delete-btn:hover {
+  background: #3f151a;
+}
+
+.history-delete-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.history-item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.history-date {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.history-status {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.history-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: #b7bfd6;
+}
+
+.history-meta.subtle {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #888;
+}
+
+.history-status.green { color: #4caf50; }
+.history-status.red { color: #f44336; }
 
 .date-submit-row {
   display: flex;

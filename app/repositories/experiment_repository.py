@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from sqlalchemy import delete
+
 from app.db.session import get_db_session
 from app.db.tables import ExperimentTable
 from app.utils.ids import new_experiment_id
@@ -50,3 +52,12 @@ def get_experiment(experiment_id: str) -> dict[str, Any] | None:
     with get_db_session() as session:
         row = session.get(ExperimentTable, experiment_id)
         return _to_dict(row) if row else None
+
+
+def delete_experiment(experiment_id: str) -> bool:
+    with get_db_session() as session:
+        row = session.get(ExperimentTable, experiment_id)
+        if row is None:
+            return False
+        session.execute(delete(ExperimentTable).where(ExperimentTable.experiment_id == experiment_id))
+        return True

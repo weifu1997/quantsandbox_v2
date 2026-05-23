@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
+
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.domain.models import ExperimentConfig
+from app.db.session import get_db_session
+from app.db.tables import DatasetMetadataTable, ReportTable, TaskTable
+from app.repositories.dataset_metadata_repository import delete_dataset_metadata_by_experiment
+from app.repositories.dataset_metadata_repository import list_dataset_metadata_by_experiment
+from app.repositories.experiment_repository import delete_experiment as repo_delete_experiment
+from app.repositories.report_repository import delete_reports_by_experiment
+from app.repositories.report_repository import list_reports_by_experiment
+from app.repositories.task_repository import delete_tasks_by_experiment
 from app.services.experiment_service import get_experiment, submit_experiment
 
 router = APIRouter(prefix="/api/experiments", tags=["experiments"])
@@ -147,9 +158,143 @@ def latest_report():
         conn.close()
 
 
+@router.get("/history")
+def experiment_history(limit: int = 20):
+    """Return recent experiment/backtest records for frontend history display."""
+    import sqlite3
+    from pathlib import Path
+
+    settings = get_settings()
+    db_path = settings.db_path
+    if not db_path or not Path(db_path).exists():
+        raise HTTPException(status_code=404, detail="no database found")
+
+    limit = max(1, min(int(limit), 100))
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                e.experiment_id,
+                e.universe,
+                e.start_date,
+                e.end_date,
+                e.factors,
+                e.horizons,
+                e.rebalance_frequency,
+                e.top_n,
+                e.weighting,
+                e.benchmark,
+                e.created_at AS experiment_created_at,
+                t.task_id,
+                t.status AS task_status,
+                t.stage AS task_stage,
+                t.error AS task_error,
+                t.result_ref,
+                t.updated_at AS task_updated_at,
+                r.report_id,
+                r.report_format,
+                r.created_at AS report_created_at
+            FROM experiments e
+            LEFT JOIN tasks t
+                ON t.task_id = (
+                    SELECT task_id FROM tasks
+                    WHERE experiment_id = e.experiment_id
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                )
+            LEFT JOIN reports r
+                ON r.report_id = (
+                    SELECT report_id FROM reports
+                    WHERE experiment_id = e.experiment_id
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                )
+            ORDER BY e.created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        items = []
+        for row in rows:
+            items.append({
+                "experiment_id": row["experiment_id"],
+                "task_id": row["task_id"],
+                "status": row["task_status"],
+                "stage": row["task_stage"],
+                "error": row["task_error"],
+                "result_ref": row["result_ref"],
+                "report_id": row["report_id"] or row["result_ref"],
+                "report_format": row["report_format"],
+                "universe": row["universe"],
+                "start_date": row["start_date"],
+                "end_date": row["end_date"],
+                "factors": json.loads(row["factors"] or "[]"),
+                "horizons": json.loads(row["horizons"] or "[]"),
+                "rebalance_frequency": row["rebalance_frequency"],
+                "top_n": row["top_n"],
+                "weighting": row["weighting"],
+                "benchmark": row["benchmark"],
+                "created_at": row["experiment_created_at"],
+                "task_updated_at": row["task_updated_at"],
+                "report_created_at": row["report_created_at"],
+            })
+        return {"status": "success", "data": {"items": items, "count": len(items)}}
+    finally:
+        conn.close()
+
+
 @router.get("/{experiment_id}")
 def read_experiment(experiment_id: str):
     result = get_experiment(experiment_id)
     if result is None:
         raise HTTPException(status_code=404, detail="experiment not found")
     return {"status": "success", "data": result}
+
+
+@router.delete("/{experiment_id}")
+def delete_experiment_record(experiment_id: str):
+    result = get_experiment(experiment_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="experiment not found")
+
+    report_rows = list_reports_by_experiment(experiment_id)
+    dataset_rows = list_dataset_metadata_by_experiment(experiment_id)
+
+    deleted_files: list[str] = []
+    missing_files: list[str] = []
+
+    def _cleanup_file(path_str: str | None):
+        if not path_str:
+            return
+        path = Path(path_str)
+        if path.exists() and path.is_file():
+            path.unlink()
+            deleted_files.append(str(path))
+        else:
+            missing_files.append(str(path))
+
+    for row in report_rows:
+        _cleanup_file(row.get("report_path"))
+
+    for row in dataset_rows:
+        _cleanup_file(row.get("dataset_path"))
+
+    deleted_reports = delete_reports_by_experiment(experiment_id)
+    deleted_tasks = delete_tasks_by_experiment(experiment_id)
+    deleted_datasets = delete_dataset_metadata_by_experiment(experiment_id)
+    deleted_experiment = repo_delete_experiment(experiment_id)
+
+    return {
+        "status": "success",
+        "data": {
+            "experiment_id": experiment_id,
+            "deleted": bool(deleted_experiment),
+            "deleted_reports": deleted_reports,
+            "deleted_tasks": deleted_tasks,
+            "deleted_dataset_metadata": deleted_datasets,
+            "deleted_files": deleted_files,
+            "missing_files": missing_files,
+        },
+    }

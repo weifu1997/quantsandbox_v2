@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from sqlalchemy import delete, select
+
 from app.db.session import get_db_session
 from app.db.tables import ReportTable
 from app.utils.ids import new_report_id
@@ -40,3 +42,15 @@ def get_report(report_id: str) -> dict[str, Any] | None:
     with get_db_session() as session:
         row = session.get(ReportTable, report_id)
         return _to_dict(row) if row else None
+
+
+def list_reports_by_experiment(experiment_id: str) -> list[dict[str, Any]]:
+    with get_db_session() as session:
+        stmt = select(ReportTable).where(ReportTable.experiment_id == experiment_id)
+        return [_to_dict(row) for row in session.scalars(stmt).all()]
+
+
+def delete_reports_by_experiment(experiment_id: str) -> int:
+    with get_db_session() as session:
+        result = session.execute(delete(ReportTable).where(ReportTable.experiment_id == experiment_id))
+        return int(result.rowcount or 0)

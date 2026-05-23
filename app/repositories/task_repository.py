@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.db.session import get_db_session
 from app.db.tables import TaskTable
@@ -89,3 +88,9 @@ def list_running_tasks() -> list[dict[str, Any]]:
     with get_db_session() as session:
         stmt = select(TaskTable).where(TaskTable.status == TaskStatus.RUNNING.value)
         return [_to_dict(row) for row in session.scalars(stmt).all()]
+
+
+def delete_tasks_by_experiment(experiment_id: str) -> int:
+    with get_db_session() as session:
+        result = session.execute(delete(TaskTable).where(TaskTable.experiment_id == experiment_id))
+        return int(result.rowcount or 0)
