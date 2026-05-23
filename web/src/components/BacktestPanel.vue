@@ -47,14 +47,37 @@
         <h3 class="section-title">回测记录</h3>
         <span class="section-desc">后端返回的最近回测/实验记录，点击可恢复查看结果。</span>
       </div>
+      <div class="history-toolbar">
+        <input v-model="historyQuery" class="history-search-input" placeholder="搜索日期 / 状态 / 因子 / experiment_id / report_id" @input="historyPage = 1" />
+        <div class="history-toolbar-actions">
+          <label class="history-select-all">
+            <input type="checkbox" :checked="allVisibleHistorySelected" @change="toggleSelectAllVisible($event)" />
+            <span>本页全选</span>
+          </label>
+          <button class="history-bulk-delete-btn" :disabled="selectedHistoryIds.length === 0 || bulkDeleting" @click="deleteSelectedHistoryItems">
+            {{ bulkDeleting ? '批量删除中...' : `批量删除（${selectedHistoryIds.length}）` }}
+          </button>
+        </div>
+      </div>
+      <div class="history-summary-row">
+        <span>共 {{ filteredHistoryItems.length }} 条记录</span>
+        <span>第 {{ historyPage }} / {{ historyTotalPages }} 页</span>
+      </div>
       <div v-if="historyError" class="empty-text">{{ historyError }}</div>
-      <div v-else-if="historyItems.length === 0" class="empty-text">暂无回测记录</div>
+      <div v-else-if="filteredHistoryItems.length === 0" class="empty-text">暂无符合条件的回测记录</div>
       <div v-else class="history-list history-scroll-window">
         <div
-          v-for="item in historyItems"
+          v-for="item in pagedHistoryItems"
           :key="item.experiment_id"
           class="history-item"
         >
+          <label class="history-checkbox-wrap">
+            <input
+              type="checkbox"
+              :checked="selectedHistorySet.has(item.experiment_id)"
+              @change="toggleHistorySelection(item.experiment_id, $event)"
+            />
+          </label>
           <button
             class="history-item-main"
             @click="loadHistoryItem(item)"
@@ -75,12 +98,17 @@
           </button>
           <button
             class="history-delete-btn"
-            :disabled="deletingExperimentIds[item.experiment_id]"
+            :disabled="deletingExperimentIds[item.experiment_id] || bulkDeleting"
             @click="deleteHistoryItem(item)"
           >
             {{ deletingExperimentIds[item.experiment_id] ? '删除中...' : '删除' }}
           </button>
         </div>
+      </div>
+      <div v-if="filteredHistoryItems.length > 0" class="history-pagination">
+        <button class="page-btn" :disabled="historyPage === 1" @click="historyPage--">‹ 上一页</button>
+        <span class="page-info">{{ historyPage }} / {{ historyTotalPages }}</span>
+        <button class="page-btn" :disabled="historyPage === historyTotalPages" @click="historyPage++">下一页 ›</button>
       </div>
     </div>
 
@@ -150,22 +178,43 @@
               </tr>
               <tr v-if="expandState[date]">
                 <td colspan="5" class="detail-cell">
-                  <div v-if="posMap[date] && Object.keys(posMap[date]).length" class="pos-table-wrap">
+                  <div v-if="actualPositionsForDate(date).length" class="pos-table-wrap">
+                    <div class="detail-section-title">实际持仓（{{ actualPositionsForDate(date).length }}只）</div>
                     <table class="pos-table">
                       <thead><tr><th>Ticker</th><th>名称</th><th>权重</th><th>价格</th><th>股数</th><th>市值</th></tr></thead>
                       <tbody>
-                        <tr v-for="(detail, ticker) in posMap[date]" :key="ticker">
-                          <td class="ticker-cell">{{ ticker }}</td>
-                          <td class="name-cell">{{ stockNameMap[ticker] || '-' }}</td>
-                          <td>{{ pctStr(detail.weight) }}</td>
-                          <td>{{ numStr(detail.price) }}</td>
-                          <td>{{ detail.shares }}</td>
-                          <td>¥{{ numStr(detail.actual_notional || detail.shares * detail.price) }}</td>
+                        <tr v-for="item in actualPositionsForDate(date)" :key="item.ticker">
+                          <td class="ticker-cell">{{ item.ticker }}</td>
+                          <td class="name-cell">{{ stockNameMap[item.ticker] || '-' }}</td>
+                          <td>{{ pctStr(item.detail.weight) }}</td>
+                          <td>{{ numStr(item.detail.price) }}</td>
+                          <td>{{ item.detail.shares }}</td>
+                          <td>¥{{ numStr(item.detail.actual_notional || item.detail.shares * item.detail.price) }}</td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
-                  <div v-else class="empty-text">无持仓明细</div>
+                  <div v-else class="empty-text">无实际持仓明细</div>
+
+                  <details v-if="skippedPositionsForDate(date).length" class="skipped-details">
+                    <summary>被跳过候选（{{ skippedPositionsForDate(date).length }}只）</summary>
+                    <div class="pos-table-wrap skipped-wrap">
+                      <table class="pos-table skipped-table">
+                        <thead><tr><th>Ticker</th><th>名称</th><th>目标权重</th><th>价格</th><th>股数</th><th>目标市值</th><th>跳过原因</th></tr></thead>
+                        <tbody>
+                          <tr v-for="item in skippedPositionsForDate(date)" :key="item.ticker">
+                            <td class="ticker-cell">{{ item.ticker }}</td>
+                            <td class="name-cell">{{ stockNameMap[item.ticker] || '-' }}</td>
+                            <td>{{ pctStr(item.detail.weight) }}</td>
+                            <td>{{ numStr(item.detail.price) }}</td>
+                            <td>{{ item.detail.shares }}</td>
+                            <td>¥{{ numStr(item.detail.target_notional || 0) }}</td>
+                            <td>{{ skippedReason(item.detail) }}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
                 </td>
               </tr>
             </template>
@@ -264,6 +313,11 @@ const stockNameMap = ref({})
 const historyItems = ref([])
 const historyError = ref('')
 const deletingExperimentIds = ref({})
+const historyQuery = ref('')
+const historyPage = ref(1)
+const historyPageSize = 8
+const selectedHistoryIds = ref([])
+const bulkDeleting = ref(false)
 
 // Core data from report
 const totalReturn = ref(0)
@@ -304,6 +358,38 @@ const pageDates = computed(() => {
   const start = (page.value - 1) * pageSize
   return list.slice(start, start + pageSize)
 })
+
+const filteredHistoryItems = computed(() => {
+  const q = historyQuery.value.trim().toLowerCase()
+  if (!q) return historyItems.value
+  return historyItems.value.filter((item) => {
+    const haystack = [
+      item.start_date,
+      item.end_date,
+      item.status,
+      item.stage,
+      item.weighting,
+      item.experiment_id,
+      item.report_id,
+      item.task_id,
+      ...(item.factors || []),
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+    return haystack.includes(q)
+  })
+})
+
+const historyTotalPages = computed(() => Math.max(1, Math.ceil(filteredHistoryItems.value.length / historyPageSize)))
+
+const pagedHistoryItems = computed(() => {
+  const start = (historyPage.value - 1) * historyPageSize
+  return filteredHistoryItems.value.slice(start, start + historyPageSize)
+})
+
+const selectedHistorySet = computed(() => new Set(selectedHistoryIds.value))
+const allVisibleHistorySelected = computed(() => pagedHistoryItems.value.length > 0 && pagedHistoryItems.value.every((item) => selectedHistorySet.value.has(item.experiment_id)))
 
 const totalReturnPct = computed(() => totalReturn.value * 100)
 const totalReturnStr = computed(() => (totalReturn.value >= 0 ? '+' : '') + (totalReturn.value * 100).toFixed(2) + '%')
@@ -355,6 +441,28 @@ function toggleExpand(date) {
   } else {
     expandState.value[date] = true
   }
+}
+
+function actualPositionsForDate(date) {
+  const pos = posMap.value[date] || {}
+  return Object.entries(pos)
+    .filter(([_, detail]) => Number(detail?.shares || 0) > 0 && !detail?.skipped)
+    .map(([ticker, detail]) => ({ ticker, detail }))
+}
+
+function skippedPositionsForDate(date) {
+  const pos = posMap.value[date] || {}
+  return Object.entries(pos)
+    .filter(([_, detail]) => Number(detail?.shares || 0) <= 0 || Boolean(detail?.skipped))
+    .map(([ticker, detail]) => ({ ticker, detail }))
+}
+
+function skippedReason(detail) {
+  if (!detail) return '未知'
+  if (!detail.price || Number(detail.price) <= 0) return '价格无效'
+  if (Number(detail.shares || 0) <= 0) return '一手约束后股数为0'
+  if (detail.skipped) return '已跳过'
+  return '未知'
 }
 
 function toggleWeighting() {
@@ -564,16 +672,75 @@ async function fetchResult(rid) {
   }
 }
 
+function toggleHistorySelection(experimentId, event) {
+  const checked = Boolean(event?.target?.checked)
+  const next = new Set(selectedHistoryIds.value)
+  if (checked) next.add(experimentId)
+  else next.delete(experimentId)
+  selectedHistoryIds.value = Array.from(next)
+}
+
+function toggleSelectAllVisible(event) {
+  const checked = Boolean(event?.target?.checked)
+  const next = new Set(selectedHistoryIds.value)
+  for (const item of pagedHistoryItems.value) {
+    if (checked) next.add(item.experiment_id)
+    else next.delete(item.experiment_id)
+  }
+  selectedHistoryIds.value = Array.from(next)
+}
+
+async function deleteSelectedHistoryItems() {
+  if (selectedHistoryIds.value.length === 0) return
+  const confirmed = window.confirm(`确认批量删除 ${selectedHistoryIds.value.length} 条回测记录吗？
+
+这会同时删除后端数据库中的 experiment/task/report 记录及相关生成文件。`)
+  if (!confirmed) return
+
+  bulkDeleting.value = true
+  try {
+    for (const experimentIdToDelete of [...selectedHistoryIds.value]) {
+      deletingExperimentIds.value = {
+        ...deletingExperimentIds.value,
+        [experimentIdToDelete]: true,
+      }
+      const resp = await fetch(API_BASE + `/api/experiments/${experimentIdToDelete}`, { method: 'DELETE' })
+      const json = await resp.json()
+      if (!resp.ok) throw new Error(json?.detail || `删除失败: ${experimentIdToDelete}`)
+      historyItems.value = historyItems.value.filter((historyItem) => historyItem.experiment_id !== experimentIdToDelete)
+      if (experimentId.value === experimentIdToDelete) {
+        experimentId.value = null
+        taskId.value = null
+        reportId.value = null
+        hasResult.value = false
+        progressPercent.value = 0
+        progressStatus.value = ''
+      }
+    }
+    selectedHistoryIds.value = []
+    await fetchHistory()
+    historyPage.value = Math.min(historyPage.value, historyTotalPages.value)
+  } catch (e) {
+    window.alert(e?.message || '批量删除失败')
+  } finally {
+    bulkDeleting.value = false
+    deletingExperimentIds.value = {}
+  }
+}
+
 async function fetchHistory() {
   historyError.value = ''
   try {
-    const resp = await fetch(API_BASE + '/api/experiments/history?limit=20')
+    const resp = await fetch(API_BASE + '/api/experiments/history?limit=100')
     const json = await resp.json()
     if (!resp.ok) {
       historyError.value = json?.detail || '回测记录加载失败'
       return
     }
     historyItems.value = json?.data?.items || []
+    const validIds = new Set(historyItems.value.map((item) => item.experiment_id))
+    selectedHistoryIds.value = selectedHistoryIds.value.filter((id) => validIds.has(id))
+    historyPage.value = Math.min(historyPage.value, Math.max(1, Math.ceil(historyItems.value.length / historyPageSize)))
   } catch (e) {
     historyError.value = '回测记录加载失败'
   }
@@ -613,6 +780,7 @@ async function deleteHistoryItem(item) {
     }
 
     historyItems.value = historyItems.value.filter((historyItem) => historyItem.experiment_id !== experimentIdToDelete)
+    selectedHistoryIds.value = selectedHistoryIds.value.filter((id) => id !== experimentIdToDelete)
 
     if (experimentId.value === experimentIdToDelete) {
       experimentId.value = null
@@ -624,6 +792,7 @@ async function deleteHistoryItem(item) {
     }
 
     await fetchHistory()
+    historyPage.value = Math.min(historyPage.value, historyTotalPages.value)
   } catch (e) {
     window.alert('删除失败')
   } finally {
@@ -748,6 +917,63 @@ onMounted(async () => {
   color: #888;
 }
 
+.history-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.history-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.history-search-input {
+  flex: 1 1 320px;
+  min-width: 240px;
+  padding: 8px 12px;
+  border: 1px solid #2a2a4a;
+  border-radius: 8px;
+  background: #0f0f23;
+  color: #e0e0f0;
+}
+
+.history-summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #9ca3af;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+.history-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #cbd5e1;
+  font-size: 12px;
+}
+
+.history-bulk-delete-btn {
+  padding: 8px 12px;
+  border: 1px solid #7f1d1d;
+  background: #2b1114;
+  color: #fca5a5;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.history-bulk-delete-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .history-list {
   display: flex;
   flex-direction: column;
@@ -763,11 +989,14 @@ onMounted(async () => {
 
 .history-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 72px;
+  grid-template-columns: 28px minmax(0, 1fr) 72px;
   gap: 12px;
   align-items: stretch;
   width: 100%;
 }
+
+.history-checkbox-wrap { display: flex; align-items: center; justify-content: center; }
+.history-checkbox-wrap input { width: 16px; height: 16px; accent-color: #2563eb; }
 
 .history-item-main {
   min-width: 0;
@@ -802,6 +1031,14 @@ onMounted(async () => {
 .history-delete-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.history-pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  margin-top: 12px;
 }
 
 .history-item-head {
@@ -1064,6 +1301,29 @@ onMounted(async () => {
 .detail-cell {
   padding: 16px !important;
   background: #0f0f23;
+}
+.detail-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #cbd5e1;
+  margin-bottom: 8px;
+}
+.skipped-details {
+  margin-top: 14px;
+  border-top: 1px dashed #334155;
+  padding-top: 12px;
+}
+.skipped-details summary {
+  cursor: pointer;
+  color: #fbbf24;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.skipped-wrap {
+  margin-top: 8px;
+}
+.skipped-table td {
+  color: #94a3b8;
 }
 .pos-table-wrap {
   max-height: 280px;
