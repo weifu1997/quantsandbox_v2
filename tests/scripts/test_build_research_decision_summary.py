@@ -410,6 +410,109 @@ def test_executive_summary_includes_real_return_governance_fields(tmp_path: Path
     assert executive["working_config_recommendation"] in {"keep", "keep_with_caution", "needs_revision", "stop_using"}
 
 
+def test_growth_realism_and_capacity_fail_force_top_level_deployment_block(tmp_path: Path):
+    reports = make_fixture_reports(tmp_path)
+    write_json(reports / "research_capacity_constraints_latest.json", {
+        "report_type": "research_capacity_constraints",
+        "strategy_capacity": [
+            {"strategy_id": "revgrowth_always_on_v1", "capacity_status": "failed", "note": "real-return capacity breach"},
+            {"strategy_id": "pbindlow_downtrend_narrow_quality_v1", "capacity_status": "acceptable", "note": "value ok"},
+            {"strategy_id": "pbindlow_downtrend_only_v1", "capacity_status": "acceptable", "note": "baseline ok"},
+        ],
+    })
+    write_json(reports / "research_realism_stress_latest.json", {
+        "report_type": "research_realism_stress",
+        "candidate_realism": [
+            {
+                "strategy_id": "revgrowth_always_on_v1",
+                "cost_sensitivity": {"status": "elevated", "note": "growth cost fail"},
+                "concentration_risk": {"status": "acceptable", "note": "ok"},
+                "liquidity_risk": {"status": "elevated", "note": "growth liquidity fail"},
+                "execution_realism": {"status": "elevated", "note": "growth execution fail"},
+                "impact_realism": {"status": "elevated", "note": "growth impact fail"},
+            },
+            {
+                "strategy_id": "pbindlow_downtrend_narrow_quality_v1",
+                "cost_sensitivity": {"status": "acceptable", "note": "ok"},
+                "concentration_risk": {"status": "acceptable", "note": "ok"},
+                "liquidity_risk": {"status": "acceptable", "note": "ok"},
+                "execution_realism": {"status": "acceptable", "note": "ok"},
+                "impact_realism": {"status": "acceptable", "note": "ok"},
+            },
+            {
+                "strategy_id": "pbindlow_downtrend_only_v1",
+                "cost_sensitivity": {"status": "acceptable", "note": "ok"},
+                "concentration_risk": {"status": "acceptable", "note": "ok"},
+                "liquidity_risk": {"status": "acceptable", "note": "ok"},
+                "execution_realism": {"status": "acceptable", "note": "ok"},
+                "impact_realism": {"status": "acceptable", "note": "ok"},
+            },
+        ],
+    })
+    write_json(reports / "strategy_scale_stress_summary_latest.json", {
+        "report_type": "strategy_scale_stress_summary",
+        "candidate_scale_stress": [
+            {
+                "strategy_id": "revgrowth_always_on_v1",
+                "deployability": {
+                    "deployable_aum_floor": "model_micro",
+                    "first_light_aum": "model_small",
+                    "first_medium_aum": None,
+                    "first_heavy_aum": None,
+                    "first_extreme_aum": None,
+                    "recommended_max_aum": "model_micro",
+                    "deployment_blocked": False,
+                    "blocking_reasons": [],
+                },
+                "stress_cases": [
+                    {
+                        "capital_label": "model_micro",
+                        "aum": 100000.0,
+                        "working_config_recommendation_impact": {"status": "keep", "reason": "micro still tradable"},
+                    }
+                ],
+            },
+            {
+                "strategy_id": "pbindlow_downtrend_narrow_quality_v1",
+                "deployability": {
+                    "deployable_aum_floor": None,
+                    "first_light_aum": None,
+                    "first_medium_aum": None,
+                    "first_heavy_aum": None,
+                    "first_extreme_aum": None,
+                    "recommended_max_aum": None,
+                    "deployment_blocked": True,
+                    "blocking_reasons": ["model_micro:value_blocked"],
+                },
+                "stress_cases": [],
+            },
+            {
+                "strategy_id": "pbindlow_downtrend_only_v1",
+                "deployability": {
+                    "deployable_aum_floor": None,
+                    "first_light_aum": None,
+                    "first_medium_aum": None,
+                    "first_heavy_aum": None,
+                    "first_extreme_aum": None,
+                    "recommended_max_aum": None,
+                    "deployment_blocked": True,
+                    "blocking_reasons": ["model_micro:value_blocked"],
+                },
+                "stress_cases": [],
+            },
+        ],
+    })
+    summary = build_summary(reports)
+    growth = summary["deployability"]["growth"]
+    assert summary["working_config_recommendation"]["status"] == "stop_using"
+    assert summary["working_config_recommendation"]["decision_inputs"]["growth_realism"] == "fail"
+    assert summary["working_config_recommendation"]["decision_inputs"]["growth_capacity"] == "fail"
+    assert growth["deployment_blocked"] is True
+    assert growth["recommended_max_aum"] is None
+    assert "model_micro:realism_fail" in growth["blocking_reasons"]
+    assert "model_micro:capacity_fail" in growth["blocking_reasons"]
+
+
 def test_scale_stress_report_is_consumed_into_summary(tmp_path: Path):
     reports = make_fixture_reports(tmp_path)
     write_json(reports / "strategy_scale_stress_summary_20260519T000000Z.json", {
@@ -616,3 +719,63 @@ def test_markdown_includes_scale_stress_section(tmp_path: Path):
     assert "First extreme AUM: model_small" in md
     assert "## Deployability summary" in md
     assert "recommended_max_aum" in md
+
+
+def test_build_summary_blocks_growth_when_realism_and_capacity_fail_even_without_scale_stress_fail(tmp_path: Path):
+    reports = make_fixture_reports(tmp_path)
+    write_json(reports / "research_realism_stress_20260523T000000Z.json", {
+        "report_type": "research_realism_stress",
+        "candidate_realism": [
+            {
+                "strategy_id": "revgrowth_always_on_v1",
+                "liquidity_risk": {"status": "elevated", "note": "thin tail"},
+                "cost_sensitivity": {"status": "elevated", "note": "real mark-to-market return is negative"},
+                "concentration_risk": {"status": "acceptable", "note": ""},
+                "execution_realism": {"status": "elevated", "note": "execution path unstable"},
+                "impact_realism": {"status": "elevated", "note": "impact path unstable"},
+            }
+        ],
+    })
+    write_json(reports / "research_capacity_constraints_20260523T000000Z.json", {
+        "report_type": "research_capacity_constraints",
+        "candidate_capacity": [
+            {
+                "strategy_id": "revgrowth_always_on_v1",
+                "capital_label": "model_micro",
+                "liquidity_capacity": {"status": "elevated", "constraint_breach": True},
+            }
+        ],
+    })
+    write_json(reports / "strategy_scale_stress_summary_20260523T000000Z.json", {
+        "report_type": "strategy_scale_stress_summary",
+        "candidate_scale_stress": [
+            {
+                "strategy_id": "revgrowth_always_on_v1",
+                "bucket_entry_thresholds": {"light": "model_micro", "medium": "model_micro", "heavy": "model_micro", "extreme": "model_micro"},
+                "deployability": {
+                    "deployable_aum_floor": "model_micro",
+                    "first_light_aum": "model_micro",
+                    "first_medium_aum": "model_micro",
+                    "first_heavy_aum": "model_micro",
+                    "first_extreme_aum": "model_micro",
+                    "recommended_max_aum": "model_micro",
+                    "deployment_blocked": False,
+                    "blocking_reasons": [],
+                },
+                "stress_cases": [
+                    {
+                        "capital_label": "model_micro",
+                        "aum": 100000.0,
+                        "working_config_recommendation_impact": {"status": "needs_revision", "reason": "scale caution only"},
+                        "executable_alpha_erosion": {"annual_return_erosion_rate": 0.01, "sharpe_erosion_rate": 0.01, "impact_cost_paid": 100.0},
+                        "dynamic_impact_v1": {"execution_diagnostics": {"bucket_counts": {"very_light": 10, "light": 1, "medium": 0, "heavy": 0, "extreme": 0}}},
+                    }
+                ],
+            }
+        ],
+    })
+    summary = build_summary(reports)
+    assert summary["working_config_recommendation"]["decision_inputs"]["growth_capacity"] == "fail"
+    assert summary["working_config_recommendation"]["status"] in {"needs_revision", "stop_using"}
+    assert summary["deployability"]["growth"]["deployment_blocked"] is True
+    assert summary["deployability"]["growth"]["recommended_max_aum"] is None

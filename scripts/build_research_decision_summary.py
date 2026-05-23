@@ -176,12 +176,12 @@ def build_line_view(candidate_states: list[dict]) -> dict:
     value_primary = next(x for x in candidate_states if x["strategy_id"] == TRACKED_CANDIDATES["value_primary"])
     return {
         "growth_line": {
-            "posture": "core",
-            "headline_action": "Keep growth core as the main tracked allocation anchor.",
+            "posture": "rebuild_candidate",
+            "headline_action": "Treat growth as a research candidate pending rebuild, not as the active execution anchor.",
         },
         "valuation_line": {
             "posture": derive_value_posture(value_primary),
-            "headline_action": "Treat value primary as a secondary line whose conviction should continue to be updated by forward reviews.",
+            "headline_action": "Treat value primary as a secondary research line whose conviction should continue to be updated by forward reviews.",
         },
     }
 
@@ -247,6 +247,7 @@ def build_executive_summary(
     working_configuration: dict | None = None,
     working_config_recommendation: dict | None = None,
     additive_eligibility: dict | None = None,
+    real_return_snapshot: dict | None = None,
 ) -> dict:
     growth = next(x for x in candidate_states if x["strategy_id"] == TRACKED_CANDIDATES["growth_primary"])
     value = next(x for x in candidate_states if x["strategy_id"] == TRACKED_CANDIDATES["value_primary"])
@@ -254,7 +255,15 @@ def build_executive_summary(
     growth_elig = (additive_eligibility or {}).get(growth["strategy_id"], "ineligible")
     value_elig = (additive_eligibility or {}).get(value["strategy_id"], "ineligible")
     scale_impact = (working_config_recommendation or {}).get("scale_stress_impact") or {}
-    if growth.get("status") == "active" and value_elig == "eligible":
+    rr = real_return_snapshot or {}
+    realized_fail = bool(rr) and (
+        (rr.get("total_return") is not None and float(rr.get("total_return")) < 0.0)
+        or (rr.get("excess_return_vs_benchmark") is not None and float(rr.get("excess_return_vs_benchmark")) < 0.0)
+    )
+    if realized_fail:
+        takeaway = "Growth review evidence remains live, but realized mark-to-market returns are negative and lag the benchmark, so growth must be downgraded to a rebuild candidate."
+        posture = "growth rebuild candidate; allocator blocked"
+    elif growth.get("status") == "active" and value_elig == "eligible":
         takeaway = "Growth remains the core line, and value has now cleared the main additive gates."
         posture = "growth core + additive value sleeve"
     elif growth.get("status") == "active":
@@ -263,13 +272,13 @@ def build_executive_summary(
     else:
         takeaway = "Tracked candidates need renewed forward evidence before stronger allocation confidence is justified."
         posture = "cautious multi-line tracking"
-    if scale_impact.get("growth", {}).get("status") == "stop_using":
+    if not realized_fail and scale_impact.get("growth", {}).get("status") == "stop_using":
         takeaway = "Growth review evidence remains live, but capital-scale executable-alpha stress now blocks treating the current working config as deployable."
         posture = "research-valid but scale-blocked growth core"
-    elif scale_impact.get("growth", {}).get("status") == "needs_revision":
+    elif not realized_fail and scale_impact.get("growth", {}).get("status") == "needs_revision":
         takeaway = "Growth still leads on review evidence, but capital-scale executable-alpha stress now forces a revised deployment stance."
         posture = "growth core with scale-stress revision"
-    elif scale_impact.get("value_primary", {}).get("status") == "stop_using":
+    elif not realized_fail and scale_impact.get("value_primary", {}).get("status") == "stop_using":
         takeaway = "Growth remains the cleaner line, but value fails capital-scale deployability and cannot be treated as a normal additive sleeve."
         posture = "growth core with scale-blocked value overlay"
     return {
@@ -283,7 +292,7 @@ def build_executive_summary(
     }
 
 
-def build_open_risks(candidate_states: list[dict], working_config_recommendation: dict | None = None) -> list[str]:
+def build_open_risks(candidate_states: list[dict], working_config_recommendation: dict | None = None, real_return_snapshot: dict | None = None) -> list[str]:
     value_primary = next(x for x in candidate_states if x["strategy_id"] == TRACKED_CANDIDATES["value_primary"])
     growth_primary = next(x for x in candidate_states if x["strategy_id"] == TRACKED_CANDIDATES["growth_primary"])
     value_realism = value_primary.get("realism_flags", {})
@@ -303,10 +312,18 @@ def build_open_risks(candidate_states: list[dict], working_config_recommendation
         risks.append("Capital-scale executable-alpha stress now shows that tradability can fail even while research returns remain positive, so deployability must be governed separately from pure alpha evidence.")
     if scale_impact.get("value_primary", {}).get("status") in {"needs_revision", "stop_using"}:
         risks.append("Value primary also fails scale-stress deployability at the tested AUM floor, so additive eligibility must remain blocked until tradability improves.")
+    rr = real_return_snapshot or {}
+    if rr:
+        total_return = rr.get("total_return")
+        excess = rr.get("excess_return_vs_benchmark")
+        if total_return is not None and float(total_return) < 0.0:
+            risks.append("Realized mark-to-market growth return is negative, so growth cannot remain the active execution anchor.")
+        if excess is not None and float(excess) < 0.0:
+            risks.append("Growth also trails the benchmark under real-return accounting, which is a stronger governance warning than pure review deterioration.")
     return risks
 
 
-def build_what_changed(candidate_states: list[dict], working_config_recommendation: dict | None = None) -> list[str]:
+def build_what_changed(candidate_states: list[dict], working_config_recommendation: dict | None = None, real_return_snapshot: dict | None = None) -> list[str]:
     value_primary = next(x for x in candidate_states if x["strategy_id"] == TRACKED_CANDIDATES["value_primary"])
     value_reference = next(x for x in candidate_states if x["strategy_id"] == TRACKED_CANDIDATES["value_baseline_reference"])
     growth = next(x for x in candidate_states if x["strategy_id"] == TRACKED_CANDIDATES["growth_primary"])
@@ -320,6 +337,11 @@ def build_what_changed(candidate_states: list[dict], working_config_recommendati
         items.append(f"Capital-scale executable-alpha stress impact on growth: {scale_impact['growth'].get('status')} (first extreme bucket at {scale_impact['growth'].get('first_extreme_aum')}).")
     if scale_impact.get("value_primary", {}).get("status"):
         items.append(f"Capital-scale executable-alpha stress impact on value primary: {scale_impact['value_primary'].get('status')} (first extreme bucket at {scale_impact['value_primary'].get('first_extreme_aum')}).")
+    rr = real_return_snapshot or {}
+    if rr and rr.get("total_return") is not None:
+        items.append(f"Realized mark-to-market growth total return: {float(rr.get('total_return')):.6f}.")
+    if rr and rr.get("excess_return_vs_benchmark") is not None:
+        items.append(f"Realized growth excess return vs benchmark: {float(rr.get('excess_return_vs_benchmark')):.6f}.")
     return items
 
 
@@ -352,18 +374,29 @@ def classify_realism_signal(candidate_state: dict) -> str:
 
 
 def load_capacity_map(reports_dir: Path) -> tuple[dict[str, dict], Path | None]:
-    try:
-        path = latest_matching_file("research_capacity_constraints_*.json", reports_dir)
-    except FileNotFoundError:
+    path: Path | None = None
+    for pattern in ("research_capacity_constraints_*.json", "research_capacity_constraints_latest.json"):
+        try:
+            path = latest_matching_file(pattern, reports_dir)
+            break
+        except FileNotFoundError:
+            continue
+    if path is None:
         return {}, None
     payload = load_json(path)
     out: dict[str, dict] = {}
-    for item in payload.get("candidate_capacity", []):
-        if item.get("capital_label") != "model_micro":
-            continue
+    if payload.get("candidate_capacity"):
+        for item in payload.get("candidate_capacity", []):
+            if item.get("capital_label") != "model_micro":
+                continue
+            strategy_id = item.get("strategy_id")
+            if strategy_id:
+                out[str(strategy_id)] = item
+        return out, path
+    for item in payload.get("strategy_capacity", []):
         strategy_id = item.get("strategy_id")
         if strategy_id:
-            out[strategy_id] = item
+            out[str(strategy_id)] = item
     return out, path
 
 
@@ -401,6 +434,13 @@ def classify_capacity_signal(strategy_id: str, capacity_map: dict[str, dict]) ->
     item = capacity_map.get(strategy_id)
     if not item:
         return "warn"
+    direct_status = str(item.get("capacity_status") or "").strip().lower()
+    if direct_status in {"failed", "fail", "blocked"}:
+        return "fail"
+    if direct_status in {"warning", "warn", "elevated", "unknown", "needs_revision"}:
+        return "warn"
+    if direct_status in {"acceptable", "pass", "passed", "ok"}:
+        return "pass"
     lc = item.get("liquidity_capacity", {})
     status = lc.get("status")
     breach = bool(lc.get("constraint_breach"))
@@ -494,7 +534,7 @@ def build_demotion_triggers(candidate_state: dict, scale_stress_impact: dict | N
     return triggers
 
 
-def build_gating_decision(candidate_states: list[dict], capacity_map: dict[str, dict], scale_stress_map: dict[str, Any] | None = None) -> tuple[dict, dict, dict, dict]:
+def build_gating_decision(candidate_states: list[dict], capacity_map: dict[str, dict], scale_stress_map: dict[str, Any] | None = None, real_return_snapshot: dict | None = None) -> tuple[dict, dict, dict, dict]:
     scale_stress_map = scale_stress_map or {}
     by_id = {x["strategy_id"]: x for x in candidate_states}
     growth = by_id[TRACKED_CANDIDATES["growth_primary"]]
@@ -516,8 +556,15 @@ def build_gating_decision(candidate_states: list[dict], capacity_map: dict[str, 
     growth_scale_stress_impact = build_scale_stress_impact(growth["strategy_id"], scale_stress_map)
     value_scale_stress_impact = build_scale_stress_impact(value["strategy_id"], scale_stress_map)
     baseline_scale_stress_impact = build_scale_stress_impact(value_baseline["strategy_id"], scale_stress_map)
+    rr = real_return_snapshot or {}
+    growth_realized_return = rr.get("total_return")
+    growth_excess_return = rr.get("excess_return_vs_benchmark")
+    growth_real_return_status = "fail" if ((growth_realized_return is not None and float(growth_realized_return) < 0.0) or (growth_excess_return is not None and float(growth_excess_return) < 0.0)) else "pass"
 
-    if growth_review == "fail":
+    if growth_real_return_status == "fail":
+        wc_status = "stop_using"
+        wc_reason = "realized mark-to-market growth return is negative and lags the benchmark, so the working config must be taken out of active use"
+    elif growth_review == "fail":
         wc_status = "stop_using"
         wc_reason = "growth review itself has failed, so the current working config can no longer stay active"
     elif growth_scale_stress == "fail":
@@ -530,8 +577,8 @@ def build_gating_decision(candidate_states: list[dict], capacity_map: dict[str, 
         wc_status = "needs_revision"
         wc_reason = "capital-scale executable-alpha stress now requires a revised working config before production-scale use"
     elif growth_realism == "fail" or growth_capacity == "fail":
-        wc_status = "keep_with_caution"
-        wc_reason = "growth still leads on review evidence, but realism/capacity blockers now force a cautious operating stance rather than normal keep"
+        wc_status = "stop_using"
+        wc_reason = "growth realism/capacity has failed under real-return governance, so the working config must be demoted from active use"
     elif growth_realism == "warn" or growth_capacity == "warn" or value_review != "pass":
         wc_status = "keep_with_caution"
         wc_reason = "growth remains usable, but realism/capacity friction and weak additive lines require caution"
@@ -545,6 +592,8 @@ def build_gating_decision(candidate_states: list[dict], capacity_map: dict[str, 
         if scale_stress == "fail":
             return "ineligible"
         if strategy_id == TRACKED_CANDIDATES["growth_primary"]:
+            if growth_real_return_status == "fail":
+                return "ineligible"
             if review == "pass" and realism == "pass" and capacity == "pass" and scale_stress == "pass":
                 return "eligible"
             if review == "pass":
@@ -582,6 +631,7 @@ def build_gating_decision(candidate_states: list[dict], capacity_map: dict[str, 
             "growth_scale_stress": growth_scale_stress,
             "value_scale_stress": value_scale_stress,
             "value_baseline_scale_stress": baseline_scale_stress,
+            "growth_realized_backtest": growth_real_return_status,
         },
         "scale_stress_impact": {
             "growth": growth_scale_stress_impact or {},
@@ -592,7 +642,11 @@ def build_gating_decision(candidate_states: list[dict], capacity_map: dict[str, 
     return working_config_recommendation, additive_eligibility, promotion_blockers, demotion_triggers
 
 
-def build_deployability_summary(scale_stress_map: dict[str, Any], reports_dir: Path = REPORTS_DIR) -> dict[str, Any]:
+def build_deployability_summary(
+    scale_stress_map: dict[str, Any],
+    decision_inputs: dict[str, str] | None = None,
+    reports_dir: Path = REPORTS_DIR,
+) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for strategy_id, strategy_block in scale_stress_map.items():
         deployability = strategy_block.get("deployability", {}) or {}
@@ -606,7 +660,19 @@ def build_deployability_summary(scale_stress_map: dict[str, Any], reports_dir: P
             key = "value_baseline_reference"
         else:
             key = str(strategy_id)
-        out[key] = dict(deployability)
+        item = dict(deployability)
+        if key == "growth" and decision_inputs is not None:
+            if decision_inputs.get("growth_realism") == "fail" or decision_inputs.get("growth_capacity") == "fail":
+                item["deployment_blocked"] = True
+                item["recommended_max_aum"] = None
+                item["deployable_aum_floor"] = None
+                reasons = list(item.get("blocking_reasons") or [])
+                if decision_inputs.get("growth_realism") == "fail":
+                    reasons.append("model_micro:realism_fail")
+                if decision_inputs.get("growth_capacity") == "fail":
+                    reasons.append("model_micro:capacity_fail")
+                item["blocking_reasons"] = sorted(set(reasons))
+        out[key] = item
     return out
 
 
@@ -741,7 +807,25 @@ def load_working_config(reports_dir: Path) -> tuple[dict | None, Path | None]:
     return load_json(path), path
 
 
-def build_working_configuration(candidate_states: list[dict], reports_dir: Path, scale_stress_map: dict[str, Any] | None = None) -> tuple[dict | None, Path | None]:
+def load_growth_real_return_snapshot(reports_dir: Path) -> dict[str, Any]:
+    path = reports_dir / "growth_personal_100k_2024_2026_boardlot_engine_latest.json"
+    if not path.exists():
+        return {}
+    payload = load_json(path)
+    result = ((payload.get("summary") or {}).get("result") or {})
+    benchmark = result.get("benchmark", {}) or {}
+    return {
+        "path": str(path),
+        "total_return": result.get("total_return"),
+        "benchmark_total_return": benchmark.get("total_return"),
+        "excess_return_vs_benchmark": benchmark.get("excess_return_vs_benchmark"),
+        "annual_return": result.get("annual_return"),
+        "sharpe": result.get("sharpe"),
+        "max_drawdown": result.get("max_drawdown"),
+    }
+
+
+def build_working_configuration(candidate_states: list[dict], reports_dir: Path, scale_stress_map: dict[str, Any] | None = None, real_return_snapshot: dict | None = None) -> tuple[dict | None, Path | None]:
     scale_stress_map = scale_stress_map or {}
     config, path = load_working_config(reports_dir)
     if not config:
@@ -762,9 +846,13 @@ def build_working_configuration(candidate_states: list[dict], reports_dir: Path,
     )
     growth_scale_stress_impact = build_scale_stress_impact(str(config.get("growth_core")), scale_stress_map)
     value_scale_stress_impact = build_scale_stress_impact(str(config.get("value_primary")), scale_stress_map)
+    rr = real_return_snapshot or {}
     if growth_scale_stress_impact and growth_scale_stress_impact.get("status") in {"needs_revision", "stop_using"}:
         status = str(growth_scale_stress_impact.get("status"))
         reason = str(growth_scale_stress_impact.get("reason"))
+    growth_block = scale_stress_map.get(str(config.get("growth_core")), {}) or {}
+    growth_deployability = (growth_block.get("deployability") or {})
+    growth_blocked = bool(growth_deployability.get("deployment_blocked"))
     value_additive_eligibility = "eligible" if value.get("status") == "active" else "blocked"
     promotion_blockers = []
     if value.get("status") != "active":
@@ -782,6 +870,22 @@ def build_working_configuration(candidate_states: list[dict], reports_dir: Path,
         demotion_triggers.append("growth_cost_sensitivity_deteriorated")
     if growth_scale_stress_impact and growth_scale_stress_impact.get("first_extreme_aum"):
         demotion_triggers.append(f"growth_scale_stress_extreme_at_{growth_scale_stress_impact.get('first_extreme_aum')}")
+    operating_mode = config.get("operating_mode")
+    keep_rule_status = config.get("keep_rule_status", status)
+    mainline_thesis = config.get("mainline_thesis")
+    if rr and ((rr.get("total_return") is not None and float(rr.get("total_return")) < 0.0) or (rr.get("excess_return_vs_benchmark") is not None and float(rr.get("excess_return_vs_benchmark")) < 0.0)):
+        operating_mode = "governance_stop_using"
+        keep_rule_status = "stop_using"
+        status = "stop_using"
+        reason = "realized mark-to-market growth return is negative and lags the benchmark, so the working config must be demoted from active use"
+        value_additive_eligibility = "blocked"
+        mainline_thesis = "growth is downgraded from execution anchor to rebuild-stage research candidate until real-return performance and benchmark-relative results recover"
+    elif growth_blocked or status == "stop_using":
+        operating_mode = "governance_stop_using"
+        keep_rule_status = "stop_using"
+        value_additive_eligibility = "blocked"
+        mainline_thesis = "growth core is blocked under real-return governance and must not remain the active working configuration"
+
     return {
         "universe_policy": config.get("working_universe_policy"),
         "weighting_policy": config.get("weighting_policy"),
@@ -789,9 +893,9 @@ def build_working_configuration(candidate_states: list[dict], reports_dir: Path,
         "value_primary": config.get("value_primary"),
         "value_status": config.get("value_status"),
         "observed_value_status": value_observed_status,
-        "operating_mode": config.get("operating_mode"),
-        "mainline_thesis": config.get("mainline_thesis"),
-        "keep_rule_status": config.get("keep_rule_status", status),
+        "operating_mode": operating_mode,
+        "mainline_thesis": mainline_thesis,
+        "keep_rule_status": keep_rule_status,
         "decision_basis": config.get("decision_basis"),
         "realism_basis": config.get("realism_basis"),
         "capacity_basis": config.get("capacity_basis"),
@@ -800,8 +904,8 @@ def build_working_configuration(candidate_states: list[dict], reports_dir: Path,
         "demotion_ruleset_version": config.get("demotion_ruleset_version"),
         "config_alignment": config_alignment,
         "working_config_review": {"status": status, "reason": reason},
-        "mainline_role": "growth_core",
-        "true_return_thesis": config.get("mainline_thesis"),
+        "mainline_role": "growth_rebuild_candidate" if keep_rule_status == "stop_using" else "growth_core",
+        "true_return_thesis": mainline_thesis,
         "additive_eligibility": value_additive_eligibility,
         "promotion_blockers": promotion_blockers,
         "demotion_triggers": demotion_triggers,
@@ -861,8 +965,9 @@ def build_summary(reports_dir: Path = REPORTS_DIR) -> dict:
         candidate_states.append(state)
         selection_trace[strategy_id] = trace
 
-    working_configuration, working_config_path = build_working_configuration(candidate_states, reports_dir, scale_stress_map)
-    working_config_recommendation, additive_eligibility, promotion_blockers, demotion_triggers = build_gating_decision(candidate_states, capacity_map, scale_stress_map)
+    real_return_snapshot = load_growth_real_return_snapshot(reports_dir)
+    working_configuration, working_config_path = build_working_configuration(candidate_states, reports_dir, scale_stress_map, real_return_snapshot)
+    working_config_recommendation, additive_eligibility, promotion_blockers, demotion_triggers = build_gating_decision(candidate_states, capacity_map, scale_stress_map, real_return_snapshot)
 
     as_of_date = max(
         x["latest_review"]["window_label"] and x["evidence_summary"]["latest_end_date"] or ""
@@ -873,18 +978,19 @@ def build_summary(reports_dir: Path = REPORTS_DIR) -> dict:
         "generated_at": pd.Timestamp.now("UTC").isoformat(),
         "as_of_date": as_of_date,
         "tracked_candidates": dict(TRACKED_CANDIDATES),
-        "deployability": build_deployability_summary(scale_stress_map, reports_dir),
+        "deployability": build_deployability_summary(scale_stress_map, working_config_recommendation.get("decision_inputs"), reports_dir),
         "working_configuration": working_configuration,
         "working_config_recommendation": working_config_recommendation,
         "additive_eligibility": additive_eligibility,
         "promotion_blockers": promotion_blockers,
         "demotion_triggers": demotion_triggers,
-        "executive_summary": build_executive_summary(candidate_states, working_configuration, working_config_recommendation, additive_eligibility),
-        "what_changed_since_last_summary": build_what_changed(candidate_states, working_config_recommendation),
+        "executive_summary": build_executive_summary(candidate_states, working_configuration, working_config_recommendation, additive_eligibility, real_return_snapshot),
+        "what_changed_since_last_summary": build_what_changed(candidate_states, working_config_recommendation, real_return_snapshot),
         "candidate_states": candidate_states,
         "line_view": build_line_view(candidate_states),
         "decision_actions": build_decision_actions(candidate_states, working_config_recommendation, additive_eligibility, promotion_blockers),
-        "open_risks": build_open_risks(candidate_states, working_config_recommendation),
+        "open_risks": build_open_risks(candidate_states, working_config_recommendation, real_return_snapshot),
+        "real_return_snapshot": real_return_snapshot,
         "source_artifacts": {
             "growth_status": str(growth_status_path),
             "value_status": str(value_status_path),

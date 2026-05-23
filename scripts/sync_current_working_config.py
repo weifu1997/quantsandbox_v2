@@ -39,6 +39,12 @@ def sync_config(config_path: Path, summary_path: Path) -> dict[str, Any]:
         config["operating_mode"] = f"governance_{wc_review.get('status')}"
     elif wcr.get("status") in {"needs_revision", "stop_using"}:
         config["operating_mode"] = f"governance_{wcr.get('status')}"
+
+    decision_inputs = wcr.get("decision_inputs") or {}
+    if wcr.get("status") == "stop_using" or decision_inputs.get("growth_realized_backtest") == "fail":
+        config["keep_rule_status"] = "stop_using"
+        config["operating_mode"] = "governance_stop_using"
+        config["mainline_thesis"] = "growth is downgraded from execution anchor to rebuild-stage research candidate until real-return performance and benchmark-relative results recover"
     notes = list(config.get("notes", []))
     sync_note = f"governance_synced_from={summary_path.name}"
     if sync_note not in notes:
