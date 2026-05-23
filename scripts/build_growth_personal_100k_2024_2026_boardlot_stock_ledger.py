@@ -50,14 +50,14 @@ def main() -> None:
         'sell_shares_total': 0,
         'buy_notional_total': 0.0,
         'sell_notional_total': 0.0,
-        'estimated_realized_pnl_total': 0.0,
-        'latest_estimated_shares_held': 0,
-        'latest_estimated_avg_cost': 0.0,
+        'realized_pnl_total': 0.0,
+        'latest_shares_held': 0,
+        'latest_avg_cost': 0.0,
         'latest_reference_price': 0.0,
-        'latest_position_notional_est': 0.0,
+        'latest_position_notional': 0.0,
         'latest_snapshot_date': '',
-        'estimated_unrealized_pnl': 0.0,
-        'estimated_total_pnl': 0.0,
+        'unrealized_pnl': 0.0,
+        'total_pnl': 0.0,
         'cumulative_end_notional': 0.0,
         'cumulative_cost_allocated': 0.0,
     })
@@ -100,7 +100,7 @@ def main() -> None:
                         'prev_weight': (prev_shares * price / start_equity) if start_equity > 0 else 0.0,
                         'new_weight': (new_shares * price / start_equity) if start_equity > 0 else 0.0,
                         'delta_weight': ((new_shares - prev_shares) * price / start_equity) if start_equity > 0 else 0.0,
-                        'estimated_realized_pnl': '',
+                        'realized_pnl': '',
                     })
                     row_acc['buy_count'] += 1
                     row_acc['buy_shares_total'] += buy_shares
@@ -125,7 +125,7 @@ def main() -> None:
                         'prev_weight': (prev_shares * price / start_equity) if start_equity > 0 else 0.0,
                         'new_weight': (new_shares * price / start_equity) if start_equity > 0 else 0.0,
                         'delta_weight': ((new_shares - prev_shares) * price / start_equity) if start_equity > 0 else 0.0,
-                        'estimated_realized_pnl': round(realized_cash_pnl, 6),
+                        'realized_pnl': round(realized_cash_pnl, 6),
                     })
                     closed_trades.append({
                         'date': d,
@@ -134,16 +134,16 @@ def main() -> None:
                         'sell_price': price,
                         'sell_shares': sell_shares,
                         'avg_cost': round(avg_cost, 6),
-                        'estimated_realized_pnl': round(realized_cash_pnl, 6),
+                        'realized_pnl': round(realized_cash_pnl, 6),
                     })
                     row_acc['sell_count'] += 1
                     row_acc['sell_shares_total'] += sell_shares
                     row_acc['sell_notional_total'] += trade_notional
+                    row_acc['realized_pnl_total'] += realized_cash_pnl
 
         prev_positions = current_positions
         end_equity = float(row['end_equity'])
         for t, shares in current_positions.items():
-            meta = day_details[t]
             acc = day_acc[t]
             end_notional = float(acc.get('end_notional', 0.0) or 0.0)
             end_price = end_notional / shares if shares > 0 else 0.0
@@ -152,21 +152,20 @@ def main() -> None:
                 'ticker': t,
                 'name': name_map.get(t, ''),
                 'weight': end_notional / end_equity if end_equity > 0 else 0.0,
-                'position_notional_est': round(end_notional, 6),
+                'position_notional': round(end_notional, 6),
                 'reference_price': round(end_price, 6),
-                'estimated_shares_held': shares,
-                'estimated_avg_cost': round(inventory[t]['avg_cost'], 6),
+                'shares_held': shares,
+                'avg_cost': round(inventory[t]['avg_cost'], 6),
                 'gross_pnl_cny': round(float(acc.get('gross_pnl_cny', 0.0) or 0.0), 6),
                 'allocated_cost_cny': round(float(acc.get('allocated_cost_cny', 0.0) or 0.0), 6),
                 'net_pnl_cny': round(float(acc.get('net_pnl_cny', 0.0) or 0.0), 6),
             })
             row_acc = per_ticker[t]
-            row_acc['latest_estimated_shares_held'] = shares
-            row_acc['latest_estimated_avg_cost'] = round(inventory[t]['avg_cost'], 6)
+            row_acc['latest_shares_held'] = shares
+            row_acc['latest_avg_cost'] = round(inventory[t]['avg_cost'], 6)
             row_acc['latest_reference_price'] = round(end_price, 6)
-            row_acc['latest_position_notional_est'] = round(end_notional, 6)
+            row_acc['latest_position_notional'] = round(end_notional, 6)
             row_acc['latest_snapshot_date'] = d
-            row_acc['estimated_total_pnl'] += float(acc.get('net_pnl_cny', 0.0) or 0.0)
             row_acc['cumulative_end_notional'] = round(end_notional, 6)
             row_acc['cumulative_cost_allocated'] += float(acc.get('allocated_cost_cny', 0.0) or 0.0)
 
@@ -180,28 +179,28 @@ def main() -> None:
             final_end_notional = float(final_accounting[t].get('end_notional', 0.0) or 0.0)
             final_shares = int(final_details.get(t, {}).get('shares', 0) or 0)
             final_price = final_end_notional / final_shares if final_shares > 0 else 0.0
-            row_acc['latest_estimated_shares_held'] = final_shares
+            row_acc['latest_shares_held'] = final_shares
             row_acc['latest_reference_price'] = round(final_price, 6)
-            row_acc['latest_position_notional_est'] = round(final_end_notional, 6)
+            row_acc['latest_position_notional'] = round(final_end_notional, 6)
             row_acc['latest_snapshot_date'] = final_date
         else:
-            row_acc['latest_estimated_shares_held'] = 0
+            row_acc['latest_shares_held'] = 0
             row_acc['latest_reference_price'] = 0.0
-            row_acc['latest_position_notional_est'] = 0.0
-        remaining_cost_basis = row_acc['latest_estimated_shares_held'] * row_acc['latest_estimated_avg_cost']
-        row_acc['estimated_unrealized_pnl'] = round(row_acc['latest_position_notional_est'] - remaining_cost_basis, 6)
-        row_acc['estimated_realized_pnl_total'] = round(
-            float(row_acc['estimated_total_pnl']) - float(row_acc['estimated_unrealized_pnl']),
+            row_acc['latest_position_notional'] = 0.0
+        remaining_cost_basis = row_acc['latest_shares_held'] * row_acc['latest_avg_cost']
+        row_acc['unrealized_pnl'] = round(row_acc['latest_position_notional'] - remaining_cost_basis, 6)
+        row_acc['realized_pnl_total'] = round(float(row_acc['realized_pnl_total']), 6)
+        row_acc['total_pnl'] = round(
+            float(row_acc['realized_pnl_total']) + float(row_acc['unrealized_pnl']),
             6,
         )
-        row_acc['estimated_total_pnl'] = round(float(row_acc['estimated_total_pnl']), 6)
         row_acc['buy_notional_total'] = round(row_acc['buy_notional_total'], 6)
         row_acc['sell_notional_total'] = round(row_acc['sell_notional_total'], 6)
         row_acc['cumulative_end_notional'] = round(row_acc['cumulative_end_notional'], 6)
         row_acc['cumulative_cost_allocated'] = round(row_acc['cumulative_cost_allocated'], 6)
 
     rows_out = sorted(per_ticker.values(), key=lambda x: x['cumulative_end_notional'], reverse=True)
-    stocks_total_end_notional = sum(x['latest_position_notional_est'] for x in rows_out)
+    stocks_total_end_notional = sum(x['latest_position_notional'] for x in rows_out)
     reconstructed_end = stocks_total_end_notional + final_cash
     period_end = float(period['summary']['aum_end'])
 
@@ -216,7 +215,7 @@ def main() -> None:
             'trade_row_count': len(trades),
             'position_snapshot_row_count': len(snapshots),
             'closed_trade_row_count': len(closed_trades),
-            'note': '基于引擎直接输出的 per_name_accounting_by_rebalance_date 重建的闭合单股账本。'
+            'note': '基于引擎直接输出的 per_name_accounting_by_rebalance_date 重建的闭合单股账本。',
         },
         'trades': trades,
         'position_snapshots': snapshots,
@@ -229,7 +228,7 @@ def main() -> None:
         'summary': {
             'ticker_count': len(rows_out),
             'cash_end': round(final_cash, 6),
-            'note': '基于引擎直接输出的 per_name_accounting_by_rebalance_date 重建的闭合股票汇总表。'
+            'note': '基于引擎直接输出的 per_name_accounting_by_rebalance_date 重建的闭合股票汇总表。',
         },
         'rows': rows_out,
     }
