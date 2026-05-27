@@ -84,6 +84,10 @@ def build_candidate_dataset(line: str, registry_item: dict, review_row: dict, ti
         selected = tickers if tickers is not None else load_growth_tickers(1000)
         ds = build_growth_dataset(selected, start_date, end_date, params["horizon"], factor)
         filtered, _ = apply_growth_filter(ds, registry_item.get("filter", {}))
+        filtered.attrs["requested_start_date"] = start_date
+        filtered.attrs["requested_end_date"] = end_date
+        filtered.attrs["data_start_date"] = str(pd.to_datetime(ds["date"]).min().strftime("%Y-%m-%d")) if not ds.empty and "date" in ds.columns else start_date
+        filtered.attrs["data_end_date"] = str(pd.to_datetime(ds["date"]).max().strftime("%Y-%m-%d")) if not ds.empty and "date" in ds.columns else end_date
         filtered.attrs["growth_strategy_id"] = registry_item.get("strategy_id")
         filtered.attrs["growth_turnover_annual_limit"] = params.get("annual_turnover_limit")
         if params.get("execution_assumptions"):
@@ -108,8 +112,12 @@ def run_cost_scenarios(dataset: pd.DataFrame, registry_item: dict) -> list[dict]
     params = registry_item["params"]
     results = []
     for scenario in COST_SCENARIOS:
+        scenario_dataset = dataset.copy()
+        scenario_dataset.attrs = dict(getattr(dataset, "attrs", {}))
+        if scenario_dataset.attrs.get("execution_config_enabled"):
+            scenario_dataset.attrs["execution_commission_bps_override"] = scenario["commission_bps"]
         bt = run_topn_backtest(
-            dataset=dataset,
+            dataset=scenario_dataset,
             factor_col=factor_column(factor),
             top_n=params["top_n"],
             rebalance_frequency=params["rebalance_frequency"],

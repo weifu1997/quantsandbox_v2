@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, List
 
 import pandas as pd
 
@@ -43,6 +44,26 @@ SAMPLE_FLAG_COLUMNS = [
     "is_valid_sample",
     "missing_reason",
 ]
+
+
+@dataclass
+class BacktestWindow:
+    requested_start_date: str
+    requested_end_date: str
+    effective_first_rebalance_date: str
+    effective_last_rebalance_date: str
+    data_start_date: str
+    data_end_date: str
+    rebalance_count: int
+    tail_truncated_rebalance_count: int
+
+
+@dataclass
+class BacktestCoverageSummary:
+    window: BacktestWindow
+    total_requested_days: int
+    total_valid_rebalance_dates: int
+    dropped_tail_dates: List[str]
 
 
 def future_return_column(horizon: int) -> str:

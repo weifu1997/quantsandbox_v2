@@ -4,7 +4,7 @@ from dataclasses import asdict
 import pandas as pd
 
 from app.config.settings import get_settings
-from app.domain.data_contracts import validate_backtest_dataset
+from app.domain.data_contracts import BacktestCoverageSummary, BacktestWindow, validate_backtest_dataset
 from app.domain.models import BacktestResult
 from app.domain.backtest.benchmark import run_benchmark
 from app.domain.backtest.cost_model import estimate_transaction_cost
@@ -248,6 +248,67 @@ def _extra_execution_cost_bps(cross_section: pd.DataFrame, holdings: dict[str, f
     return float(sum(per_name_bps) / len(per_name_bps)), per_name_bps
 
 
+def _format_date(value) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    return pd.Timestamp(value).strftime("%Y-%m-%d")
+
+
+def _dataset_attr_date(dataset: pd.DataFrame, key: str, fallback: str) -> str:
+    value = dataset.attrs.get(key)
+    if value in (None, ""):
+        return fallback
+    return _format_date(value)
+
+
+def _build_backtest_coverage_summary(
+    original_dataset: pd.DataFrame,
+    rebalance_frequency: str,
+    executed_rebalance_dates: list[str],
+) -> BacktestCoverageSummary:
+    original_dates = sorted(pd.to_datetime(original_dataset["date"]).dropna().drop_duplicates().tolist()) if "date" in original_dataset.columns else []
+    data_start_date = _format_date(original_dates[0]) if original_dates else ""
+    data_end_date = _format_date(original_dates[-1]) if original_dates else ""
+    requested_start_date = _dataset_attr_date(original_dataset, "requested_start_date", data_start_date)
+    requested_end_date = _dataset_attr_date(original_dataset, "requested_end_date", data_end_date)
+
+    requested_start_ts = pd.to_datetime(requested_start_date) if requested_start_date else None
+    requested_end_ts = pd.to_datetime(requested_end_date) if requested_end_date else None
+    requested_dates = original_dates
+    if requested_start_ts is not None:
+        requested_dates = [dt for dt in requested_dates if pd.Timestamp(dt) >= requested_start_ts]
+    if requested_end_ts is not None:
+        requested_dates = [dt for dt in requested_dates if pd.Timestamp(dt) <= requested_end_ts]
+
+    requested_rebalance_dates = select_rebalance_dates(requested_dates, rebalance_frequency)
+    executed_keys = list(executed_rebalance_dates)
+    effective_first = executed_keys[0] if executed_keys else ""
+    effective_last = executed_keys[-1] if executed_keys else ""
+    effective_last_ts = pd.to_datetime(effective_last) if effective_last else None
+    dropped_tail_dates = [
+        _format_date(dt)
+        for dt in requested_rebalance_dates
+        if effective_last_ts is None or pd.Timestamp(dt) > effective_last_ts
+    ]
+
+    window = BacktestWindow(
+        requested_start_date=requested_start_date,
+        requested_end_date=requested_end_date,
+        effective_first_rebalance_date=effective_first,
+        effective_last_rebalance_date=effective_last,
+        data_start_date=_dataset_attr_date(original_dataset, "data_start_date", data_start_date),
+        data_end_date=_dataset_attr_date(original_dataset, "data_end_date", data_end_date),
+        rebalance_count=len(executed_keys),
+        tail_truncated_rebalance_count=len(dropped_tail_dates),
+    )
+    return BacktestCoverageSummary(
+        window=window,
+        total_requested_days=len(requested_dates),
+        total_valid_rebalance_dates=len(executed_keys),
+        dropped_tail_dates=dropped_tail_dates,
+    )
+
+
 def run_topn_backtest(
     dataset: pd.DataFrame,
     factor_col: str,
@@ -263,6 +324,8 @@ def run_topn_backtest(
     execution_cfg = _execution_config(dataset)
     return_col = f"delayed_future_return_{horizon}d" if execution_cfg.get("enabled") and f"delayed_future_return_{horizon}d" in dataset.columns else f"future_return_{horizon}d"
     validate_backtest_dataset(dataset, factor_col, return_col)
+    original_dataset = dataset.copy()
+    original_dataset.attrs = dict(getattr(dataset, "attrs", {}))
     sample = dataset.copy()
     sample["date"] = pd.to_datetime(sample["date"])
     if "is_valid_sample" in sample.columns:
@@ -498,6 +561,12 @@ def run_topn_backtest(
 
     bm = run_benchmark(sample, return_col, benchmark, rebalance_frequency)
     ppy = periods_per_year(rebalance_frequency)
+    coverage_summary = _build_backtest_coverage_summary(
+        original_dataset=original_dataset,
+        rebalance_frequency=rebalance_frequency,
+        executed_rebalance_dates=list(returns_by_date.keys()),
+    )
+    coverage_payload = asdict(coverage_summary)
     payload = {
         "factor_name": factor_col.replace("factor:", ""),
         "horizon": horizon,
@@ -508,6 +577,8 @@ def run_topn_backtest(
         "accounting_method": "mark_to_market_close",
         "mark_price_field": "close",
         "research_label_return_column": return_col,
+        "backtest_window": coverage_payload["window"],
+        "backtest_coverage_summary": coverage_payload,
         "annual_return": annual_return(returns, ppy),
         "total_return": total_return(equity_curve),
         "max_drawdown": max_drawdown(equity_curve),

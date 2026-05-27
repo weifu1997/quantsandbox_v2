@@ -98,6 +98,134 @@ def test_run_topn_backtest_basic_flow() -> None:
     assert payload["benchmark_name"] == "equal_weight_universe"
 
 
+def test_run_topn_backtest_backtest_window_uses_requested_and_effective_dates() -> None:
+    dataset = pd.DataFrame([
+        {"date": "2024-01-02", "ticker": "a", "factor:score": 2.0, "future_return_5d": 0.10, "is_valid_sample": True, "amount": 100.0, "next_open_price": 1.0, "open": 1.0, "close": 1.10},
+        {"date": "2024-01-02", "ticker": "b", "factor:score": 1.0, "future_return_5d": 0.05, "is_valid_sample": True, "amount": 100.0, "next_open_price": 1.0, "open": 1.0, "close": 1.05},
+        {"date": "2024-01-08", "ticker": "a", "factor:score": 2.0, "future_return_5d": 0.03, "is_valid_sample": True, "amount": 100.0, "next_open_price": 1.0, "open": 1.0, "close": 1.03},
+        {"date": "2024-01-08", "ticker": "b", "factor:score": 1.0, "future_return_5d": 0.01, "is_valid_sample": True, "amount": 100.0, "next_open_price": 1.0, "open": 1.0, "close": 1.01},
+    ])
+    dataset.attrs["requested_start_date"] = "2024-01-01"
+    dataset.attrs["requested_end_date"] = "2024-01-31"
+    dataset.attrs["data_start_date"] = "2023-12-15"
+    dataset.attrs["data_end_date"] = "2024-02-09"
+
+    payload = run_topn_backtest(
+        dataset=dataset,
+        factor_col="factor:score",
+        top_n=1,
+        rebalance_frequency="W",
+        weighting="equal",
+        benchmark="equal_weight_universe",
+        commission_bps=0.0,
+        slippage_bps=0.0,
+        horizon=5,
+    ).payload
+
+    backtest_window = payload["backtest_window"]
+    assert backtest_window["requested_start_date"] == "2024-01-01"
+    assert backtest_window["requested_end_date"] == "2024-01-31"
+    assert backtest_window["effective_first_rebalance_date"] == "2024-01-02"
+    assert backtest_window["effective_last_rebalance_date"] == "2024-01-08"
+    assert backtest_window["data_start_date"] == "2023-12-15"
+    assert backtest_window["data_end_date"] == "2024-02-09"
+    assert backtest_window["rebalance_count"] == 2
+    assert backtest_window["tail_truncated_rebalance_count"] == 0
+
+
+def test_run_topn_backtest_backtest_coverage_summary_reports_tail_truncation() -> None:
+    dataset = pd.DataFrame([
+        {"date": "2024-01-02", "ticker": "a", "factor:score": 2.0, "future_return_10d": 0.10, "is_valid_sample": True, "amount": 100.0, "next_open_price": 1.0, "open": 1.0, "close": 1.10},
+        {"date": "2024-01-02", "ticker": "b", "factor:score": 1.0, "future_return_10d": 0.05, "is_valid_sample": True, "amount": 100.0, "next_open_price": 1.0, "open": 1.0, "close": 1.05},
+        {"date": "2024-01-08", "ticker": "a", "factor:score": 2.0, "future_return_10d": 0.03, "is_valid_sample": True, "amount": 100.0, "next_open_price": 1.0, "open": 1.0, "close": 1.03},
+        {"date": "2024-01-08", "ticker": "b", "factor:score": 1.0, "future_return_10d": 0.01, "is_valid_sample": True, "amount": 100.0, "next_open_price": 1.0, "open": 1.0, "close": 1.01},
+        {"date": "2024-01-15", "ticker": "a", "factor:score": 2.0, "future_return_10d": None, "is_valid_sample": False, "amount": 100.0, "next_open_price": 1.0, "open": 1.0, "close": 1.02},
+        {"date": "2024-01-15", "ticker": "b", "factor:score": 1.0, "future_return_10d": None, "is_valid_sample": False, "amount": 100.0, "next_open_price": 1.0, "open": 1.0, "close": 1.00},
+        {"date": "2024-01-22", "ticker": "a", "factor:score": 2.0, "future_return_10d": None, "is_valid_sample": False, "amount": 100.0, "next_open_price": 1.0, "open": 1.0, "close": 1.01},
+        {"date": "2024-01-22", "ticker": "b", "factor:score": 1.0, "future_return_10d": None, "is_valid_sample": False, "amount": 100.0, "next_open_price": 1.0, "open": 1.0, "close": 0.99},
+    ])
+    dataset.attrs["requested_start_date"] = "2024-01-01"
+    dataset.attrs["requested_end_date"] = "2024-01-31"
+    dataset.attrs["data_start_date"] = "2024-01-02"
+    dataset.attrs["data_end_date"] = "2024-01-22"
+
+    payload = run_topn_backtest(
+        dataset=dataset,
+        factor_col="factor:score",
+        top_n=1,
+        rebalance_frequency="W",
+        weighting="equal",
+        benchmark="equal_weight_universe",
+        commission_bps=0.0,
+        slippage_bps=0.0,
+        horizon=10,
+    ).payload
+
+    summary = payload["backtest_coverage_summary"]
+    assert summary["window"]["requested_start_date"] == "2024-01-01"
+    assert summary["window"]["requested_end_date"] == "2024-01-31"
+    assert summary["window"]["effective_first_rebalance_date"] == "2024-01-02"
+    assert summary["window"]["effective_last_rebalance_date"] == "2024-01-08"
+    assert summary["window"]["tail_truncated_rebalance_count"] == 2
+    assert summary["total_requested_days"] == 4
+    assert summary["total_valid_rebalance_dates"] == 2
+    assert summary["dropped_tail_dates"] == ["2024-01-15", "2024-01-22"]
+
+
+def test_run_topn_backtest_backtest_window_defaults_to_dataset_dates_when_attrs_missing() -> None:
+    dataset = pd.DataFrame([
+        {"date": "2024-01-03", "ticker": "a", "factor:score": 2.0, "future_return_5d": 0.10, "is_valid_sample": True, "amount": 100.0, "next_open_price": 1.0, "open": 1.0, "close": 1.10},
+        {"date": "2024-01-03", "ticker": "b", "factor:score": 1.0, "future_return_5d": 0.05, "is_valid_sample": True, "amount": 100.0, "next_open_price": 1.0, "open": 1.0, "close": 1.05},
+        {"date": "2024-01-10", "ticker": "a", "factor:score": 2.0, "future_return_5d": 0.03, "is_valid_sample": True, "amount": 100.0, "next_open_price": 1.0, "open": 1.0, "close": 1.03},
+        {"date": "2024-01-10", "ticker": "b", "factor:score": 1.0, "future_return_5d": 0.01, "is_valid_sample": True, "amount": 100.0, "next_open_price": 1.0, "open": 1.0, "close": 1.01},
+    ])
+
+    payload = run_topn_backtest(
+        dataset=dataset,
+        factor_col="factor:score",
+        top_n=1,
+        rebalance_frequency="W",
+        weighting="equal",
+        benchmark="equal_weight_universe",
+        commission_bps=0.0,
+        slippage_bps=0.0,
+        horizon=5,
+    ).payload
+
+    backtest_window = payload["backtest_window"]
+    assert backtest_window["requested_start_date"] == "2024-01-03"
+    assert backtest_window["requested_end_date"] == "2024-01-10"
+    assert backtest_window["data_start_date"] == "2024-01-03"
+    assert backtest_window["data_end_date"] == "2024-01-10"
+    assert backtest_window["tail_truncated_rebalance_count"] == 0
+
+
+def test_run_topn_backtest_backtest_coverage_summary_shape_is_backward_compatible_addition() -> None:
+    dataset = pd.DataFrame([
+        {"date": "2024-01-02", "ticker": "a", "factor:score": 2.0, "future_return_5d": 0.10, "is_valid_sample": True, "amount": 100.0, "next_open_price": 1.0, "open": 1.0, "close": 1.10},
+        {"date": "2024-01-02", "ticker": "b", "factor:score": 1.0, "future_return_5d": 0.05, "is_valid_sample": True, "amount": 100.0, "next_open_price": 1.0, "open": 1.0, "close": 1.05},
+    ])
+
+    payload = run_topn_backtest(
+        dataset=dataset,
+        factor_col="factor:score",
+        top_n=1,
+        rebalance_frequency="D",
+        weighting="equal",
+        benchmark="equal_weight_universe",
+        commission_bps=0.0,
+        slippage_bps=0.0,
+        horizon=5,
+    ).payload
+
+    assert "backtest_window" in payload
+    assert "backtest_coverage_summary" in payload
+    assert payload["factor_name"] == "score"
+    assert "equity_curve" in payload
+    assert "returns_by_rebalance_date" in payload
+    assert payload["backtest_coverage_summary"]["window"] == payload["backtest_window"]
+
+
 def test_apply_turnover_limit_bounds_final_name_count() -> None:
     previous = {f"old{i}": 0.05 for i in range(20)}
     target = {f"new{i}": 0.05 for i in range(20)}
